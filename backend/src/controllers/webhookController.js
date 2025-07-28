@@ -130,8 +130,9 @@ class WebhookController {
 
       // Verify webhook signature if secret is configured
       if (process.env.YELLOWCARD_WEBHOOK_SECRET) {
-        const signature = req.headers['x-yellowcard-signature'];
-        const isValid = this.verifyWebhookSignature(
+        const signature = req.headers['x-yellowcard-signature'] || req.headers['x-yc-signature'];
+        const yellowCardService = require('../services/yellowCardService');
+        const isValid = yellowCardService.validateWebhookSignature(
           JSON.stringify(req.body),
           signature,
           process.env.YELLOWCARD_WEBHOOK_SECRET
@@ -169,29 +170,68 @@ class WebhookController {
       // Process based on event type
       switch (event_type) {
         case 'collection.completed':
-          // Process successful collection (deposit)
-          const depositResult = await transactionService.processMobileMoneyDeposit(
-            customer_phone,
-            parseFloat(amount),
-            currency,
-            {
-              provider: 'yellowcard',
-              reference: reference,
-              transactionId: id
-            }
-          );
+          // Process successful collection (crypto purchase)
+          const { Transaction, User } = require('../db/models');
+          const walletService = require('../services/walletService');
 
-          if (depositResult.success) {
-            logger.info(`Yellow Card deposit processed successfully for ${customer_phone}`);
+          // Find user by phone number
+          const user = await User.findByPhone(customer_phone);
+          if (!user) {
+            logger.error(`User not found for YellowCard collection: ${customer_phone}`);
+            break;
+          }
+
+          // Create transaction record
+          const transaction = await Transaction.create({
+            phoneNumber: customer_phone,
+            type: 'yellowcard_purchase',
+            amount: parseFloat(amount),
+            currency: currency,
+            status: 'completed',
+            metadata: {
+              provider: 'yellowcard',
+              collectionId: id,
+              reference: reference,
+              eventType: event_type
+            }
+          });
+
+          // Mint equivalent USDT/stable coins to user's wallet
+          const mintResult = await walletService.mintZrUSD(customer_phone, amount.toString());
+
+          if (mintResult.success) {
+            logger.info(`YellowCard crypto purchase completed for ${customer_phone}: ${amount} ${currency}`);
+
+            // Send SMS confirmation
+            const SMSService = require('../services/smsEngine');
+            await SMSService.sendTransactionConfirmation(customer_phone, {
+              type: 'crypto_purchase',
+              amount: amount,
+              currency: currency,
+              status: 'completed',
+              provider: 'YellowCard'
+            });
+          } else {
+            logger.error(`Failed to mint tokens for YellowCard purchase: ${customer_phone}`);
+            await Transaction.updateStatus(transaction.id, 'failed');
           }
           break;
 
         case 'collection.failed':
           // Handle failed collection
           logger.warn(`Yellow Card collection failed for ${customer_phone}`);
+
+          // Update any pending transaction
+          const { Transaction: TransactionModel } = require('../db/models');
+          const pendingTx = await TransactionModel.findPendingByReference(id);
+          if (pendingTx) {
+            await TransactionModel.updateStatus(pendingTx.id, 'failed');
+          }
+
+          const SMSService = require('../services/smsEngine');
           await SMSService.sendErrorNotification(
             customer_phone,
-            'Payment collection failed. Please try again.'
+            'Crypto purchase failed. Please try again or contact support.'
           );
           break;
 

@@ -54,6 +54,7 @@ app.get('/health', (req, res) => {
 });
 
 // API routes
+app.use('/api/auth', require('./src/routes/authRoutes'));
 app.use('/api/sms', smsRoutes);
 app.use('/api/ussd', ussdRoutes);
 app.use('/api/webhooks', webhookRoutes);

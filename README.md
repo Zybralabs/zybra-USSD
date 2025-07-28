@@ -1,29 +1,33 @@
-# Zybra SMS/USSD DeFi Transaction System
+# Zybra USSD DeFi Platform
 
-A comprehensive SMS and USSD-based transaction system that enables users to interact with DeFi protocols through simple mobile interfaces. Built with Africa's Talking APIs, PostgreSQL, Redis, and Ethereum blockchain integration.
+A mobile-first DeFi platform that enables users to invest in decentralized finance protocols through simple USSD menus, accessible on any mobile phone including feature phones.
 
-## 🚀 Features
+## 🌟 Features
 
 ### Core Functionality
-- **SMS Integration**: Send/receive SMS for transaction notifications and commands
-- **USSD Menu System**: Interactive USSD menus for balance checks, transfers, and account management
-- **Blockchain Integration**: Direct interaction with ZrUSD smart contract on Ethereum
-- **Mobile Money Integration**: Support for Airtel Money and other mobile payment providers
-- **Multi-currency Support**: Handle MWK, KES, and other African currencies with automatic conversion
+- **USSD Interface** - Simple 3-option menu (*123#): Check Balance, Invest, Withdraw
+- **Shadow Wallets** - Phone number-based Ethereum wallets for seamless onboarding
+- **Fiat-to-DeFi** - Direct investment from mobile money to DeFi protocols
+- **Multi-Protocol Support** - Morpho lending vaults with more protocols coming soon
 
-### Security & Reliability
-- **Rate Limiting**: Protect against spam and abuse
-- **OTP Verification**: Secure user authentication via SMS
-- **Encrypted Key Storage**: Secure wallet private key management
-- **Transaction Monitoring**: Real-time transaction status tracking
-- **Error Handling**: Comprehensive error handling and user notifications
+### Security & Authentication
+- **Enhanced Authentication** - Multi-layer OTP-based security system
+- **Progressive Rate Limiting** - Abuse prevention with automatic escalation
+- **Cryptographic Security** - SHA-256 hashing and HMAC signatures
+- **Session Management** - Secure token-based sessions with automatic expiry
+
+### Integrations
+- **Africa's Talking** - USSD and SMS services for African markets
+- **YellowCard API** - Crypto purchase/sale with local payment methods
+- **Morpho Protocol** - DeFi lending and investment vaults
+- **Ethereum Mainnet** - Direct smart contract interactions
 
 ### Developer Experience
-- **RESTful APIs**: Well-documented API endpoints
-- **Docker Support**: Easy deployment with Docker Compose
-- **Database Migrations**: Automated database schema management
-- **Comprehensive Logging**: Detailed logging for debugging and monitoring
-- **Health Checks**: Built-in health monitoring endpoints
+- **Comprehensive Testing** - Unit, integration, and API test suites
+- **Enhanced Documentation** - Complete system and API documentation
+- **Docker Support** - Easy deployment with Docker Compose
+- **Database Migrations** - Automated schema management with DeFi support
+- **Health Monitoring** - Built-in health checks and observability
 
 ## 🏗️ Architecture
 

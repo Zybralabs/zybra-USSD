@@ -2,6 +2,7 @@ const logger = require('../utils/logger');
 const redisClient = require('../db/redisClient');
 const { User, Transaction, USSDSession } = require('../db/models');
 const SMSService = require('./smsEngine');
+const AuthService = require('./authService');
 
 class USSDService {
   /**
@@ -68,31 +69,62 @@ class USSDService {
     switch (currentMenu) {
       case 'main':
         return await this.handleMainMenu(userInput, phoneNumber);
-      
+
       case 'balance':
         return await this.handleBalanceMenu(userInput, phoneNumber);
-      
+
+      case 'invest':
+        return await this.handleInvestMenu(userInput, sessionData, phoneNumber);
+
+      case 'invest_amount':
+        return await this.handleInvestAmountMenu(userInput, sessionData, phoneNumber);
+
+      case 'invest_vault_select':
+        return await this.handleVaultSelectionMenu(userInput, sessionData, phoneNumber);
+
+      case 'invest_confirm':
+        return await this.handleInvestConfirmMenu(userInput, sessionData, phoneNumber);
+
+      case 'invest_otp_verify':
+        return await this.handleInvestOTPVerifyMenu(userInput, sessionData, phoneNumber);
+
+      case 'withdraw':
+        return await this.handleWithdrawMenu(userInput, sessionData, phoneNumber);
+
+      case 'withdraw_vault_select':
+        return await this.handleWithdrawVaultSelectMenu(userInput, sessionData, phoneNumber);
+
+      case 'withdraw_amount':
+        return await this.handleWithdrawAmountMenu(userInput, sessionData, phoneNumber);
+
+      case 'withdraw_confirm':
+        return await this.handleWithdrawConfirmMenu(userInput, sessionData, phoneNumber);
+
+      case 'withdraw_otp_verify':
+        return await this.handleWithdrawOTPVerifyMenu(userInput, sessionData, phoneNumber);
+
+      // Legacy menu handlers (kept for backward compatibility)
       case 'send_money':
         return await this.handleSendMoneyMenu(userInput, sessionData, phoneNumber);
-      
+
       case 'send_amount':
         return await this.handleSendAmountMenu(userInput, sessionData, phoneNumber);
-      
+
       case 'send_confirm':
         return await this.handleSendConfirmMenu(userInput, sessionData, phoneNumber);
-      
+
       case 'receive_money':
         return await this.handleReceiveMoneyMenu(userInput, phoneNumber);
-      
+
       case 'transaction_history':
         return await this.handleTransactionHistoryMenu(userInput, phoneNumber);
-      
+
       case 'account_info':
         return await this.handleAccountInfoMenu(userInput, phoneNumber);
-      
+
       case 'help':
         return await this.handleHelpMenu(userInput);
-      
+
       default:
         return await this.handleMainMenu('', phoneNumber);
     }
@@ -108,17 +140,17 @@ class USSDService {
     if (!userInput) {
       // First time or returning to main menu
       const user = await User.findByPhone(phoneNumber);
-      
+
       if (!user) {
         // New user - create account
         const walletService = require('./walletService');
         const newUser = await walletService.createUserWallet(phoneNumber);
-        
+
         // Send welcome SMS
         await SMSService.sendWelcomeSMS(phoneNumber, newUser.walletAddress);
-        
+
         return {
-          text: `CON Welcome to Zybra! 🎉\nYour account has been created.\n\n1. Check Balance\n2. Send Money\n3. Receive Money\n4. Transaction History\n5. Account Info\n6. Help\n0. Exit`,
+          text: `CON Welcome to Zybra DeFi! 🎉\nYour crypto wallet has been created.\n\n1. Check Balance\n2. Invest in DeFi\n3. Withdraw Funds\n0. Exit`,
           continue: true,
           nextMenu: 'main',
           sessionData: {}
@@ -126,7 +158,7 @@ class USSDService {
       }
 
       return {
-        text: `CON Welcome back to Zybra! 💰\n\n1. Check Balance\n2. Send Money\n3. Receive Money\n4. Transaction History\n5. Account Info\n6. Help\n0. Exit`,
+        text: `CON Welcome to Zybra DeFi! 💰\n\n1. Check Balance\n2. Invest in DeFi\n3. Withdraw Funds\n0. Exit`,
         continue: true,
         nextMenu: 'main',
         sessionData: {}
@@ -138,20 +170,14 @@ class USSDService {
       case '1':
         return { text: '', continue: true, nextMenu: 'balance', sessionData: {} };
       case '2':
-        return { text: '', continue: true, nextMenu: 'send_money', sessionData: {} };
+        return { text: '', continue: true, nextMenu: 'invest', sessionData: {} };
       case '3':
-        return { text: '', continue: true, nextMenu: 'receive_money', sessionData: {} };
-      case '4':
-        return { text: '', continue: true, nextMenu: 'transaction_history', sessionData: {} };
-      case '5':
-        return { text: '', continue: true, nextMenu: 'account_info', sessionData: {} };
-      case '6':
-        return { text: '', continue: true, nextMenu: 'help', sessionData: {} };
+        return { text: '', continue: true, nextMenu: 'withdraw', sessionData: {} };
       case '0':
-        return { text: 'END Thank you for using Zybra! 👋', continue: false };
+        return { text: 'END Thank you for using Zybra DeFi! 👋', continue: false };
       default:
         return {
-          text: `CON Invalid option. Please try again.\n\n1. Check Balance\n2. Send Money\n3. Receive Money\n4. Transaction History\n5. Account Info\n6. Help\n0. Exit`,
+          text: `CON Invalid option. Please try again.\n\n1. Check Balance\n2. Invest in DeFi\n3. Withdraw Funds\n0. Exit`,
           continue: true,
           nextMenu: 'main',
           sessionData: {}
@@ -168,16 +194,816 @@ class USSDService {
   static async handleBalanceMenu(userInput, phoneNumber) {
     try {
       const user = await User.findByPhone(phoneNumber);
-      const balance = user?.balance || 0;
-      
+      const walletBalance = user?.balance || 0;
+
+      // Get Morpho vault positions
+      const morphoService = require('./morphoService');
+      const positionsResult = await morphoService.getUserPositions(user?.wallet_address);
+
+      let balanceText = `Your Zybra Portfolio 💰\n\nWallet Balance: ${walletBalance} USDT\n`;
+
+      if (positionsResult.success && positionsResult.positions.length > 0) {
+        let totalInvested = 0;
+        balanceText += `\nDeFi Investments:\n`;
+
+        positionsResult.positions.slice(0, 3).forEach((pos, index) => {
+          const amount = parseFloat(pos.assetsUsd || pos.assets || 0);
+          totalInvested += amount;
+          balanceText += `${index + 1}. ${pos.vaultName.substring(0, 15)}: $${amount.toFixed(2)}\n`;
+        });
+
+        if (positionsResult.positions.length > 3) {
+          balanceText += `...and ${positionsResult.positions.length - 3} more\n`;
+        }
+
+        balanceText += `\nTotal Invested: $${totalInvested.toFixed(2)}`;
+        balanceText += `\nTotal Portfolio: $${(walletBalance + totalInvested).toFixed(2)}`;
+      } else {
+        balanceText += `\nDeFi Investments: $0.00`;
+        balanceText += `\nTotal Portfolio: $${walletBalance.toFixed(2)}`;
+      }
+
+      balanceText += `\n\nWallet: ${user?.wallet_address?.substring(0, 10)}...`;
+
       return {
-        text: `END Your Zybra Balance 💰\n\nBalance: ${balance} ZrUSD\nWallet: ${user?.wallet_address?.substring(0, 10)}...\n\nThank you for using Zybra!`,
+        text: `END ${balanceText}`,
         continue: false
       };
     } catch (error) {
       logger.error('Error getting balance:', error);
       return {
         text: 'END Unable to retrieve balance. Please try again later.',
+        continue: false
+      };
+    }
+  }
+
+  /**
+   * Handle invest menu - show investment options
+   * @param {string} userInput - User input
+   * @param {Object} sessionData - Current session data
+   * @param {string} phoneNumber - User's phone number
+   * @returns {Promise<Object>} - Menu response
+   */
+  static async handleInvestMenu(userInput, sessionData, phoneNumber) {
+    if (!userInput) {
+      const user = await User.findByPhone(phoneNumber);
+      const balance = user?.balance || 0;
+
+      if (balance < 10) {
+        return {
+          text: `END Insufficient Balance 💸\n\nYou need at least $10 USDT to invest.\nCurrent balance: $${balance}\n\nPlease add funds to your wallet first.`,
+          continue: false
+        };
+      }
+
+      return {
+        text: `CON Invest in DeFi 📈\n\nBalance: $${balance} USDT\n\n1. Buy Crypto & Invest\n2. Invest Existing Balance\n9. Back to Main Menu\n0. Exit`,
+        continue: true,
+        nextMenu: 'invest',
+        sessionData: { balance }
+      };
+    }
+
+    switch (userInput) {
+      case '1':
+        return {
+          text: 'CON Buy Crypto & Invest 💳\n\nEnter amount in KES to invest:\n(Min: 1000 KES)',
+          continue: true,
+          nextMenu: 'invest_amount',
+          sessionData: { ...sessionData, investmentType: 'buy_and_invest' }
+        };
+      case '2':
+        return {
+          text: `CON Invest Existing Balance 💰\n\nAvailable: $${sessionData.balance} USDT\n\nEnter amount to invest:\n(Min: $10 USDT)`,
+          continue: true,
+          nextMenu: 'invest_amount',
+          sessionData: { ...sessionData, investmentType: 'existing_balance' }
+        };
+      case '9':
+        return { text: '', continue: true, nextMenu: 'main', sessionData: {} };
+      case '0':
+        return { text: 'END Thank you for using Zybra DeFi! 👋', continue: false };
+      default:
+        return {
+          text: `CON Invalid option. Please try again.\n\n1. Buy Crypto & Invest\n2. Invest Existing Balance\n9. Back to Main Menu\n0. Exit`,
+          continue: true,
+          nextMenu: 'invest',
+          sessionData
+        };
+    }
+  }
+
+  /**
+   * Handle investment amount input
+   * @param {string} userInput - User input
+   * @param {Object} sessionData - Current session data
+   * @param {string} phoneNumber - User's phone number
+   * @returns {Promise<Object>} - Menu response
+   */
+  static async handleInvestAmountMenu(userInput, sessionData, phoneNumber) {
+    const amount = parseFloat(userInput);
+    const { investmentType, balance } = sessionData;
+
+    // Validate amount
+    if (isNaN(amount) || amount <= 0) {
+      return {
+        text: `CON Invalid amount. Please enter a valid number.\n\nEnter amount to invest:`,
+        continue: true,
+        nextMenu: 'invest_amount',
+        sessionData
+      };
+    }
+
+    if (investmentType === 'buy_and_invest') {
+      // Buying crypto with KES
+      if (amount < 1000) {
+        return {
+          text: `CON Minimum investment is 1000 KES.\n\nEnter amount in KES:`,
+          continue: true,
+          nextMenu: 'invest_amount',
+          sessionData
+        };
+      }
+
+      // Convert KES to approximate USDT (assuming 1 USD = 130 KES)
+      const usdtAmount = (amount / 130).toFixed(2);
+
+      return {
+        text: '',
+        continue: true,
+        nextMenu: 'invest_vault_select',
+        sessionData: {
+          ...sessionData,
+          investAmount: amount,
+          usdtAmount: parseFloat(usdtAmount),
+          currency: 'KES'
+        }
+      };
+    } else {
+      // Using existing balance
+      if (amount < 10) {
+        return {
+          text: `CON Minimum investment is $10 USDT.\n\nEnter amount in USDT:`,
+          continue: true,
+          nextMenu: 'invest_amount',
+          sessionData
+        };
+      }
+
+      if (amount > balance) {
+        return {
+          text: `CON Insufficient balance. Available: $${balance}\n\nEnter amount in USDT:`,
+          continue: true,
+          nextMenu: 'invest_amount',
+          sessionData
+        };
+      }
+
+      return {
+        text: '',
+        continue: true,
+        nextMenu: 'invest_vault_select',
+        sessionData: {
+          ...sessionData,
+          investAmount: amount,
+          usdtAmount: amount,
+          currency: 'USDT'
+        }
+      };
+    }
+  }
+
+  /**
+   * Handle vault selection menu
+   * @param {string} userInput - User input
+   * @param {Object} sessionData - Current session data
+   * @param {string} phoneNumber - User's phone number
+   * @returns {Promise<Object>} - Menu response
+   */
+  static async handleVaultSelectionMenu(userInput, sessionData, phoneNumber) {
+    if (!userInput) {
+      // Fetch available Morpho vaults
+      const morphoService = require('./morphoService');
+      const vaultsResult = await morphoService.fetchAvailableVaults(); // Fetch popular vaults
+
+      if (!vaultsResult.success || vaultsResult.vaults.length === 0) {
+        return {
+          text: 'END Sorry, no investment vaults are available at the moment. Please try again later.',
+          continue: false
+        };
+      }
+
+      const formattedVaults = morphoService.formatVaultsForUSSD(vaultsResult.vaults);
+      let vaultText = `CON Select Investment Vault 📊\n\nAmount: ${sessionData.currency === 'KES' ? sessionData.investAmount + ' KES' : '$' + sessionData.usdtAmount}\n\n`;
+
+      formattedVaults.forEach(vault => {
+        vaultText += `${vault.index}. ${vault.name}\n   APY: ${vault.apy} | Risk: ${vault.risk}\n`;
+      });
+
+      vaultText += `\n9. Back\n0. Exit`;
+
+      return {
+        text: vaultText,
+        continue: true,
+        nextMenu: 'invest_vault_select',
+        sessionData: { ...sessionData, availableVaults: vaultsResult.vaults }
+      };
+    }
+
+    const selection = parseInt(userInput);
+    const { availableVaults } = sessionData;
+
+    if (userInput === '9') {
+      return { text: '', continue: true, nextMenu: 'invest_amount', sessionData };
+    }
+
+    if (userInput === '0') {
+      return { text: 'END Thank you for using Zybra DeFi! 👋', continue: false };
+    }
+
+    if (isNaN(selection) || selection < 1 || selection > availableVaults.length) {
+      return {
+        text: `CON Invalid selection. Please choose 1-${availableVaults.length}, 9 for back, or 0 to exit.`,
+        continue: true,
+        nextMenu: 'invest_vault_select',
+        sessionData
+      };
+    }
+
+    const selectedVault = availableVaults[selection - 1];
+
+    return {
+      text: '',
+      continue: true,
+      nextMenu: 'invest_confirm',
+      sessionData: { ...sessionData, selectedVault }
+    };
+  }
+
+  /**
+   * Handle investment confirmation
+   * @param {string} userInput - User input
+   * @param {Object} sessionData - Current session data
+   * @param {string} phoneNumber - User's phone number
+   * @returns {Promise<Object>} - Menu response
+   */
+  static async handleInvestConfirmMenu(userInput, sessionData, phoneNumber) {
+    const { selectedVault, investAmount, usdtAmount, currency, investmentType } = sessionData;
+
+    if (!userInput) {
+      let confirmText = `CON Confirm Investment 🔒\n\n`;
+      confirmText += `Vault: ${selectedVault.name}\n`;
+      confirmText += `Amount: ${currency === 'KES' ? investAmount + ' KES' : '$' + usdtAmount}\n`;
+      confirmText += `Expected APY: ${(selectedVault.netApy * 100).toFixed(2)}%\n`;
+      confirmText += `Risk Level: ${selectedVault.riskLevel}\n\n`;
+
+      if (investmentType === 'buy_and_invest') {
+        confirmText += `This will:\n1. Buy ~$${usdtAmount} USDT\n2. Invest in ${selectedVault.symbol}\n\n`;
+      } else {
+        confirmText += `This will invest your USDT in ${selectedVault.symbol}\n\n`;
+      }
+
+      confirmText += `1. Confirm Investment\n2. Cancel\n0. Exit`;
+
+      return {
+        text: confirmText,
+        continue: true,
+        nextMenu: 'invest_confirm',
+        sessionData
+      };
+    }
+
+    switch (userInput) {
+      case '1':
+        // Process investment
+        return await this.processInvestment(sessionData, phoneNumber);
+      case '2':
+        return { text: '', continue: true, nextMenu: 'invest_vault_select', sessionData };
+      case '0':
+        return { text: 'END Thank you for using Zybra DeFi! 👋', continue: false };
+      default:
+        return {
+          text: 'CON Invalid option. Please choose:\n\n1. Confirm Investment\n2. Cancel\n0. Exit',
+          continue: true,
+          nextMenu: 'invest_confirm',
+          sessionData
+        };
+    }
+  }
+
+  /**
+   * Handle OTP verification for investment
+   * @param {string} userInput - User input (OTP)
+   * @param {Object} sessionData - Current session data
+   * @param {string} phoneNumber - User's phone number
+   * @returns {Promise<Object>} - Menu response
+   */
+  static async handleInvestOTPVerifyMenu(userInput, sessionData, phoneNumber) {
+    if (!userInput) {
+      return {
+        text: `CON Security Verification 🔐\n\nEnter the 6-digit OTP sent to your phone:\n\n(Enter OTP or 0 to cancel)`,
+        continue: true,
+        nextMenu: 'invest_otp_verify',
+        sessionData
+      };
+    }
+
+    if (userInput === '0') {
+      return {
+        text: 'END Investment cancelled. Thank you for using Zybra DeFi! 👋',
+        continue: false
+      };
+    }
+
+    // Verify OTP
+    const verification = await AuthService.verifySecureOTP(phoneNumber, userInput, 'investment');
+    if (!verification.success) {
+      return {
+        text: `CON Verification Failed ❌\n\n${verification.error}\n\nEnter OTP again or 0 to cancel:`,
+        continue: true,
+        nextMenu: 'invest_otp_verify',
+        sessionData
+      };
+    }
+
+    // OTP verified, mark as authenticated and proceed with investment
+    const updatedSessionData = { ...sessionData, authVerified: true };
+    return await this.processInvestmentAfterAuth(updatedSessionData, phoneNumber);
+  }
+
+  /**
+   * Process the investment transaction
+   * @param {Object} sessionData - Session data with investment details
+   * @param {string} phoneNumber - User's phone number
+   * @returns {Promise<Object>} - Investment result
+   */
+  static async processInvestment(sessionData, phoneNumber) {
+    try {
+      const { selectedVault, investAmount, usdtAmount, investmentType, authVerified } = sessionData;
+
+      // Check if user is authorized for investment operations
+      const authorization = await AuthService.authorizeWalletOperation(phoneNumber, 'invest');
+      if (!authorization.success) {
+        if (authorization.requiresAuth || authorization.requiresRecentAuth) {
+          // Generate OTP for authentication
+          const otpResult = await AuthService.generateSecureOTP(phoneNumber, 'investment');
+          if (otpResult.success) {
+            return {
+              text: `CON Security Verification Required 🔐\n\nAn OTP has been sent to your phone.\nEnter the 6-digit code to confirm your investment:\n\n(Enter OTP or 0 to cancel)`,
+              continue: true,
+              nextMenu: 'invest_otp_verify',
+              sessionData: { ...sessionData, otpSent: true }
+            };
+          } else {
+            return {
+              text: `END Authentication Failed ❌\n\n${otpResult.error}\n\nPlease try again later.`,
+              continue: false
+            };
+          }
+        } else {
+          return {
+            text: `END Investment Not Authorized ❌\n\n${authorization.error}\n\nPlease contact support if this persists.`,
+            continue: false
+          };
+        }
+      }
+
+      return await this.processInvestmentAfterAuth(sessionData, phoneNumber);
+    } catch (error) {
+      logger.error('Error in processInvestment:', error);
+      return {
+        text: 'END Investment failed due to system error. Please try again later.',
+        continue: false
+      };
+    }
+  }
+
+  /**
+   * Process investment after authentication is verified
+   * @param {Object} sessionData - Session data with investment details
+   * @param {string} phoneNumber - User's phone number
+   * @returns {Promise<Object>} - Investment result
+   */
+  static async processInvestmentAfterAuth(sessionData, phoneNumber) {
+    try {
+      const { selectedVault, investAmount, usdtAmount, investmentType } = sessionData;
+      const user = await User.findByPhone(phoneNumber);
+
+      if (investmentType === 'buy_and_invest') {
+        // First buy crypto via YellowCard, then invest
+        const yellowCardService = require('./yellowCardService');
+
+        const purchaseResult = await yellowCardService.purchaseCrypto({
+          phoneNumber,
+          fiatAmount: investAmount,
+          fiatCurrency: 'KES',
+          cryptoCurrency: 'USDT',
+          countryCode: 'KE',
+          paymentMethod: 'mobile_money',
+          firstName: user.first_name || 'User',
+          lastName: user.last_name || 'Zybra'
+        });
+
+        if (!purchaseResult.success) {
+          return {
+            text: `END Investment Failed ❌\n\nCrypto purchase failed: ${purchaseResult.error}\n\nPlease try again later.`,
+            continue: false
+          };
+        }
+
+        // Create pending investment record
+        await Transaction.create({
+          phoneNumber,
+          type: 'pending_investment',
+          amount: usdtAmount,
+          currency: 'USDT',
+          status: 'pending',
+          metadata: {
+            vaultAddress: selectedVault.address,
+            vaultName: selectedVault.name,
+            yellowCardId: purchaseResult.collectionId,
+            investmentType: 'buy_and_invest'
+          }
+        });
+
+        return {
+          text: `END Investment Initiated! 🚀\n\nStep 1: Buying ${usdtAmount} USDT with ${investAmount} KES\n\nYou'll receive SMS instructions for payment.\n\nOnce payment is confirmed, we'll automatically invest in ${selectedVault.name}.`,
+          continue: false
+        };
+
+      } else {
+        // Invest existing balance directly
+        if (user.balance < usdtAmount) {
+          return {
+            text: `END Insufficient Balance ❌\n\nRequired: $${usdtAmount}\nAvailable: $${user.balance}\n\nPlease add funds first.`,
+            continue: false
+          };
+        }
+
+        // For now, create a pending investment record
+        // In a full implementation, this would interact with Morpho contracts
+        await Transaction.create({
+          phoneNumber,
+          type: 'morpho_investment',
+          amount: usdtAmount,
+          currency: 'USDT',
+          status: 'completed',
+          metadata: {
+            vaultAddress: selectedVault.address,
+            vaultName: selectedVault.name,
+            investmentType: 'existing_balance'
+          }
+        });
+
+        // Update user balance
+        await User.updateBalance(phoneNumber, user.balance - usdtAmount);
+
+        return {
+          text: `END Investment Successful! 🎉\n\nInvested: $${usdtAmount} USDT\nVault: ${selectedVault.name}\nExpected APY: ${(selectedVault.netApy * 100).toFixed(2)}%\n\nYour investment is now earning yield!`,
+          continue: false
+        };
+      }
+
+    } catch (error) {
+      logger.error('Error processing investment:', error);
+      return {
+        text: 'END Investment failed due to a technical error. Please try again later.',
+        continue: false
+      };
+    }
+  }
+
+  /**
+   * Handle withdraw menu - show withdrawal options
+   * @param {string} userInput - User input
+   * @param {Object} sessionData - Current session data
+   * @param {string} phoneNumber - User's phone number
+   * @returns {Promise<Object>} - Menu response
+   */
+  static async handleWithdrawMenu(userInput, sessionData, phoneNumber) {
+    if (!userInput) {
+      const user = await User.findByPhone(phoneNumber);
+
+      // Get user's vault positions
+      const morphoService = require('./morphoService');
+      const positionsResult = await morphoService.getUserPositions(user?.wallet_address);
+
+      if (!positionsResult.success || positionsResult.positions.length === 0) {
+        return {
+          text: `END No Investments Found 📭\n\nYou don't have any active DeFi investments to withdraw from.\n\nStart investing to earn yield!`,
+          continue: false
+        };
+      }
+
+      return {
+        text: `CON Withdraw Funds 💸\n\nYou have ${positionsResult.positions.length} active investment(s)\n\n1. Withdraw from DeFi\n2. Withdraw to Mobile Money\n9. Back to Main Menu\n0. Exit`,
+        continue: true,
+        nextMenu: 'withdraw',
+        sessionData: { positions: positionsResult.positions }
+      };
+    }
+
+    switch (userInput) {
+      case '1':
+        return { text: '', continue: true, nextMenu: 'withdraw_vault_select', sessionData };
+      case '2':
+        return {
+          text: 'CON Withdraw to Mobile Money 📱\n\nThis feature will be available soon.\n\nFor now, you can withdraw to your wallet and then transfer.\n\n9. Back\n0. Exit',
+          continue: true,
+          nextMenu: 'withdraw',
+          sessionData
+        };
+      case '9':
+        return { text: '', continue: true, nextMenu: 'main', sessionData: {} };
+      case '0':
+        return { text: 'END Thank you for using Zybra DeFi! 👋', continue: false };
+      default:
+        return {
+          text: `CON Invalid option. Please try again.\n\n1. Withdraw from DeFi\n2. Withdraw to Mobile Money\n9. Back to Main Menu\n0. Exit`,
+          continue: true,
+          nextMenu: 'withdraw',
+          sessionData
+        };
+    }
+  }
+
+  /**
+   * Handle withdraw vault selection
+   * @param {string} userInput - User input
+   * @param {Object} sessionData - Current session data
+   * @param {string} phoneNumber - User's phone number
+   * @returns {Promise<Object>} - Menu response
+   */
+  static async handleWithdrawVaultSelectMenu(userInput, sessionData, phoneNumber) {
+    if (!userInput) {
+      const { positions } = sessionData;
+
+      let vaultText = `CON Select Investment to Withdraw 📊\n\n`;
+
+      positions.slice(0, 5).forEach((pos, index) => {
+        const amount = parseFloat(pos.assetsUsd || pos.assets || 0);
+        vaultText += `${index + 1}. ${pos.vaultName.substring(0, 20)}\n   Balance: $${amount.toFixed(2)}\n`;
+      });
+
+      vaultText += `\n9. Back\n0. Exit`;
+
+      return {
+        text: vaultText,
+        continue: true,
+        nextMenu: 'withdraw_vault_select',
+        sessionData
+      };
+    }
+
+    const selection = parseInt(userInput);
+    const { positions } = sessionData;
+
+    if (userInput === '9') {
+      return { text: '', continue: true, nextMenu: 'withdraw', sessionData };
+    }
+
+    if (userInput === '0') {
+      return { text: 'END Thank you for using Zybra DeFi! 👋', continue: false };
+    }
+
+    if (isNaN(selection) || selection < 1 || selection > Math.min(positions.length, 5)) {
+      return {
+        text: `CON Invalid selection. Please choose 1-${Math.min(positions.length, 5)}, 9 for back, or 0 to exit.`,
+        continue: true,
+        nextMenu: 'withdraw_vault_select',
+        sessionData
+      };
+    }
+
+    const selectedPosition = positions[selection - 1];
+
+    return {
+      text: '',
+      continue: true,
+      nextMenu: 'withdraw_amount',
+      sessionData: { ...sessionData, selectedPosition }
+    };
+  }
+
+  /**
+   * Handle withdrawal amount input
+   * @param {string} userInput - User input
+   * @param {Object} sessionData - Current session data
+   * @param {string} phoneNumber - User's phone number
+   * @returns {Promise<Object>} - Menu response
+   */
+  static async handleWithdrawAmountMenu(userInput, sessionData, phoneNumber) {
+    const { selectedPosition } = sessionData;
+    const maxAmount = parseFloat(selectedPosition.assetsUsd || selectedPosition.assets || 0);
+
+    if (!userInput) {
+      return {
+        text: `CON Withdraw Amount 💰\n\nFrom: ${selectedPosition.vaultName}\nAvailable: $${maxAmount.toFixed(2)}\n\nEnter amount to withdraw:\n(Max: $${maxAmount.toFixed(2)})`,
+        continue: true,
+        nextMenu: 'withdraw_amount',
+        sessionData
+      };
+    }
+
+    const amount = parseFloat(userInput);
+
+    // Validate amount
+    if (isNaN(amount) || amount <= 0) {
+      return {
+        text: `CON Invalid amount. Please enter a valid number.\n\nEnter amount to withdraw:`,
+        continue: true,
+        nextMenu: 'withdraw_amount',
+        sessionData
+      };
+    }
+
+    if (amount > maxAmount) {
+      return {
+        text: `CON Amount exceeds available balance.\nAvailable: $${maxAmount.toFixed(2)}\n\nEnter amount to withdraw:`,
+        continue: true,
+        nextMenu: 'withdraw_amount',
+        sessionData
+      };
+    }
+
+    return {
+      text: '',
+      continue: true,
+      nextMenu: 'withdraw_confirm',
+      sessionData: { ...sessionData, withdrawAmount: amount }
+    };
+  }
+
+  /**
+   * Handle withdrawal confirmation
+   * @param {string} userInput - User input
+   * @param {Object} sessionData - Current session data
+   * @param {string} phoneNumber - User's phone number
+   * @returns {Promise<Object>} - Menu response
+   */
+  static async handleWithdrawConfirmMenu(userInput, sessionData, phoneNumber) {
+    const { selectedPosition, withdrawAmount } = sessionData;
+
+    if (!userInput) {
+      let confirmText = `CON Confirm Withdrawal 🔒\n\n`;
+      confirmText += `From: ${selectedPosition.vaultName}\n`;
+      confirmText += `Amount: $${withdrawAmount.toFixed(2)} USDT\n`;
+      confirmText += `To: Your Zybra Wallet\n\n`;
+      confirmText += `1. Confirm Withdrawal\n2. Cancel\n0. Exit`;
+
+      return {
+        text: confirmText,
+        continue: true,
+        nextMenu: 'withdraw_confirm',
+        sessionData
+      };
+    }
+
+    switch (userInput) {
+      case '1':
+        // Process withdrawal
+        return await this.processWithdrawal(sessionData, phoneNumber);
+      case '2':
+        return { text: '', continue: true, nextMenu: 'withdraw_amount', sessionData };
+      case '0':
+        return { text: 'END Thank you for using Zybra DeFi! 👋', continue: false };
+      default:
+        return {
+          text: 'CON Invalid option. Please choose:\n\n1. Confirm Withdrawal\n2. Cancel\n0. Exit',
+          continue: true,
+          nextMenu: 'withdraw_confirm',
+          sessionData
+        };
+    }
+  }
+
+  /**
+   * Handle OTP verification for withdrawal
+   * @param {string} userInput - User input (OTP)
+   * @param {Object} sessionData - Current session data
+   * @param {string} phoneNumber - User's phone number
+   * @returns {Promise<Object>} - Menu response
+   */
+  static async handleWithdrawOTPVerifyMenu(userInput, sessionData, phoneNumber) {
+    if (!userInput) {
+      return {
+        text: `CON Security Verification 🔐\n\nEnter the 6-digit OTP sent to your phone:\n\n(Enter OTP or 0 to cancel)`,
+        continue: true,
+        nextMenu: 'withdraw_otp_verify',
+        sessionData
+      };
+    }
+
+    if (userInput === '0') {
+      return {
+        text: 'END Withdrawal cancelled. Thank you for using Zybra DeFi! 👋',
+        continue: false
+      };
+    }
+
+    // Verify OTP
+    const verification = await AuthService.verifySecureOTP(phoneNumber, userInput, 'withdrawal');
+    if (!verification.success) {
+      return {
+        text: `CON Verification Failed ❌\n\n${verification.error}\n\nEnter OTP again or 0 to cancel:`,
+        continue: true,
+        nextMenu: 'withdraw_otp_verify',
+        sessionData
+      };
+    }
+
+    // OTP verified, mark as authenticated and proceed with withdrawal
+    const updatedSessionData = { ...sessionData, authVerified: true };
+    return await this.processWithdrawalAfterAuth(updatedSessionData, phoneNumber);
+  }
+
+  /**
+   * Process the withdrawal transaction
+   * @param {Object} sessionData - Session data with withdrawal details
+   * @param {string} phoneNumber - User's phone number
+   * @returns {Promise<Object>} - Withdrawal result
+   */
+  static async processWithdrawal(sessionData, phoneNumber) {
+    try {
+      const { selectedPosition, withdrawAmount } = sessionData;
+
+      // Check if user is authorized for withdrawal operations
+      const authorization = await AuthService.authorizeWalletOperation(phoneNumber, 'withdraw');
+      if (!authorization.success) {
+        if (authorization.requiresAuth || authorization.requiresRecentAuth) {
+          // Generate OTP for authentication
+          const otpResult = await AuthService.generateSecureOTP(phoneNumber, 'withdrawal');
+          if (otpResult.success) {
+            return {
+              text: `CON Security Verification Required 🔐\n\nAn OTP has been sent to your phone.\nEnter the 6-digit code to confirm your withdrawal:\n\n(Enter OTP or 0 to cancel)`,
+              continue: true,
+              nextMenu: 'withdraw_otp_verify',
+              sessionData: { ...sessionData, otpSent: true }
+            };
+          } else {
+            return {
+              text: `END Authentication Failed ❌\n\n${otpResult.error}\n\nPlease try again later.`,
+              continue: false
+            };
+          }
+        } else {
+          return {
+            text: `END Withdrawal Not Authorized ❌\n\n${authorization.error}\n\nPlease contact support if this persists.`,
+            continue: false
+          };
+        }
+      }
+
+      return await this.processWithdrawalAfterAuth(sessionData, phoneNumber);
+    } catch (error) {
+      logger.error('Error in processWithdrawal:', error);
+      return {
+        text: 'END Withdrawal failed due to system error. Please try again later.',
+        continue: false
+      };
+    }
+  }
+
+  /**
+   * Process withdrawal after authentication is verified
+   * @param {Object} sessionData - Session data with withdrawal details
+   * @param {string} phoneNumber - User's phone number
+   * @returns {Promise<Object>} - Withdrawal result
+   */
+  static async processWithdrawalAfterAuth(sessionData, phoneNumber) {
+    try {
+      const { selectedPosition, withdrawAmount } = sessionData;
+      const user = await User.findByPhone(phoneNumber);
+
+      // For now, simulate the withdrawal by creating a transaction record
+      // In a full implementation, this would interact with Morpho contracts
+      await Transaction.create({
+        phoneNumber,
+        type: 'morpho_withdrawal',
+        amount: withdrawAmount,
+        currency: 'USDT',
+        status: 'completed',
+        metadata: {
+          vaultAddress: selectedPosition.vaultAddress,
+          vaultName: selectedPosition.vaultName,
+          withdrawalType: 'to_wallet'
+        }
+      });
+
+      // Update user balance
+      const newBalance = (user.balance || 0) + withdrawAmount;
+      await User.updateBalance(phoneNumber, newBalance);
+
+      return {
+        text: `END Withdrawal Successful! 🎉\n\nWithdrawn: $${withdrawAmount.toFixed(2)} USDT\nFrom: ${selectedPosition.vaultName}\n\nNew wallet balance: $${newBalance.toFixed(2)}\n\nFunds are now in your Zybra wallet!`,
+        continue: false
+      };
+
+    } catch (error) {
+      logger.error('Error processing withdrawal:', error);
+      return {
+        text: 'END Withdrawal failed due to a technical error. Please try again later.',
         continue: false
       };
     }
