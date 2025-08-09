@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 # Zybra SMS/USSD DeFi Transaction System
 
 A comprehensive SMS and USSD-based transaction system that enables users to interact with DeFi protocols through simple mobile interfaces. Built with Africa's Talking APIs, PostgreSQL, Redis, and Ethereum blockchain integration.
@@ -24,6 +25,38 @@ A comprehensive SMS and USSD-based transaction system that enables users to inte
 - **Database Migrations**: Automated database schema management
 - **Comprehensive Logging**: Detailed logging for debugging and monitoring
 - **Health Checks**: Built-in health monitoring endpoints
+=======
+# Zybra USSD DeFi Platform
+
+A mobile-first DeFi platform that enables users to invest in decentralized finance protocols through simple USSD menus, accessible on any mobile phone including feature phones.
+
+## 🌟 Features
+
+### Core Functionality
+- **USSD Interface** - Simple 3-option menu (*123#): Check Balance, Invest, Withdraw
+- **Shadow Wallets** - Phone number-based Ethereum wallets for seamless onboarding
+- **Fiat-to-DeFi** - Direct investment from mobile money to DeFi protocols
+- **Multi-Protocol Support** - Morpho lending vaults with more protocols coming soon
+
+### Security & Authentication
+- **Enhanced Authentication** - Multi-layer OTP-based security system
+- **Progressive Rate Limiting** - Abuse prevention with automatic escalation
+- **Cryptographic Security** - SHA-256 hashing and HMAC signatures
+- **Session Management** - Secure token-based sessions with automatic expiry
+
+### Integrations
+- **Africa's Talking** - USSD and SMS services for African markets
+- **YellowCard API** - Crypto purchase/sale with local payment methods
+- **Morpho Protocol** - DeFi lending and investment vaults
+- **Ethereum Mainnet** - Direct smart contract interactions
+
+### Developer Experience
+- **Comprehensive Testing** - Unit, integration, and API test suites
+- **Enhanced Documentation** - Complete system and API documentation
+- **Docker Support** - Easy deployment with Docker Compose
+- **Database Migrations** - Automated schema management with DeFi support
+- **Health Monitoring** - Built-in health checks and observability
+>>>>>>> e493750ee6533facd8eb627b1ad0498cb277d1f1
 
 ## 🏗️ Architecture
 

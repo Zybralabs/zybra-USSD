@@ -1,6 +1,7 @@
 const jwt = require('jsonwebtoken');
 const { promisify } = require('util');
-const User = require('../db/models/User');
+const { User } = require('../db/models');
+const AuthService = require('../services/authService');
 const logger = require('../utils/logger');
 
 // Protect routes - require authentication
@@ -52,7 +53,7 @@ const protect = async (req, res, next) => {
   }
 };
 
-// Phone number authentication for SMS/USSD
+// Enhanced phone number authentication for SMS/USSD
 const authenticatePhone = async (req, res, next) => {
   try {
     const { phoneNumber } = req.body;
@@ -64,18 +65,18 @@ const authenticatePhone = async (req, res, next) => {
       });
     }
 
-    // Normalize phone number (remove +, spaces, etc.)
-    const normalizedPhone = phoneNumber.replace(/[\s\-\+]/g, '');
-    
-    // Validate phone number format (basic validation)
-    if (!/^\d{10,15}$/.test(normalizedPhone)) {
+    // Use enhanced phone validation
+    const validation = AuthService.validatePhoneNumber(phoneNumber);
+    if (!validation.isValid) {
       return res.status(400).json({
         success: false,
-        error: 'Invalid phone number format'
+        error: validation.error
       });
     }
 
-    req.phoneNumber = normalizedPhone;
+    req.phoneNumber = validation.normalizedNumber;
+    req.countryCode = validation.countryCode;
+    req.country = validation.country;
     next();
   } catch (error) {
     logger.error('Phone auth middleware error:', error);
@@ -119,8 +120,175 @@ const phoneRateLimit = async (req, res, next) => {
   }
 };
 
+// Secure session authentication for USSD
+const authenticateSecureSession = async (req, res, next) => {
+  try {
+    const sessionToken = req.headers['x-session-token'] || req.body.sessionToken;
+
+    if (!sessionToken) {
+      return res.status(401).json({
+        success: false,
+        error: 'Session token required',
+        requiresAuth: true
+      });
+    }
+
+    const validation = await AuthService.validateSecureSession(sessionToken);
+    if (!validation.success) {
+      return res.status(401).json({
+        success: false,
+        error: validation.error,
+        requiresAuth: true
+      });
+    }
+
+    req.session = validation.session;
+    req.phoneNumber = validation.session.phoneNumber;
+    next();
+  } catch (error) {
+    logger.error('Secure session auth error:', error);
+    return res.status(500).json({
+      success: false,
+      error: 'Server error in session authentication'
+    });
+  }
+};
+
+// Wallet operation authorization
+const authorizeWalletOperation = (operation) => {
+  return async (req, res, next) => {
+    try {
+      const phoneNumber = req.phoneNumber || req.body.phoneNumber;
+
+      if (!phoneNumber) {
+        return res.status(400).json({
+          success: false,
+          error: 'Phone number required for wallet operations'
+        });
+      }
+
+      const authorization = await AuthService.authorizeWalletOperation(phoneNumber, operation);
+      if (!authorization.success) {
+        const statusCode = authorization.requiresAuth || authorization.requiresRecentAuth ? 401 : 403;
+        return res.status(statusCode).json({
+          success: false,
+          error: authorization.error,
+          requiresAuth: authorization.requiresAuth,
+          requiresRecentAuth: authorization.requiresRecentAuth
+        });
+      }
+
+      req.authorizedUser = authorization.user;
+      next();
+    } catch (error) {
+      logger.error('Wallet operation auth error:', error);
+      return res.status(500).json({
+        success: false,
+        error: 'Server error in wallet authorization'
+      });
+    }
+  };
+};
+
+// Enhanced rate limiting with progressive delays
+const enhancedPhoneRateLimit = async (req, res, next) => {
+  try {
+    const redisClient = require('../db/redisClient');
+    const phoneNumber = req.phoneNumber || req.body.phoneNumber;
+
+    if (!phoneNumber) {
+      return next();
+    }
+
+    const key = `enhanced_rate_limit:${phoneNumber}`;
+    const current = await redisClient.get(key);
+
+    if (current) {
+      const attempts = parseInt(current);
+
+      // Progressive rate limiting
+      if (attempts >= 20) { // 24 hour block
+        return res.status(429).json({
+          success: false,
+          error: 'Account temporarily locked due to excessive requests. Please contact support.'
+        });
+      } else if (attempts >= 10) { // 1 hour block
+        return res.status(429).json({
+          success: false,
+          error: 'Too many requests. Please wait 1 hour before trying again.'
+        });
+      } else if (attempts >= 5) { // 15 minute block
+        return res.status(429).json({
+          success: false,
+          error: 'Too many requests. Please wait 15 minutes before trying again.'
+        });
+      }
+    }
+
+    // Increment counter with appropriate expiry
+    const newCount = current ? parseInt(current) + 1 : 1;
+    let expiry = 3600; // 1 hour default
+
+    if (newCount >= 20) {
+      expiry = 86400; // 24 hours
+    } else if (newCount >= 10) {
+      expiry = 3600; // 1 hour
+    } else if (newCount >= 5) {
+      expiry = 900; // 15 minutes
+    }
+
+    await redisClient.setex(key, expiry, newCount);
+    next();
+  } catch (error) {
+    logger.error('Enhanced phone rate limit error:', error);
+    next(); // Continue on error to not block legitimate requests
+  }
+};
+
+// OTP verification middleware
+const verifyOTP = (purpose = 'authentication') => {
+  return async (req, res, next) => {
+    try {
+      const { phoneNumber, otp } = req.body;
+
+      if (!phoneNumber || !otp) {
+        return res.status(400).json({
+          success: false,
+          error: 'Phone number and OTP are required'
+        });
+      }
+
+      const verification = await AuthService.verifySecureOTP(phoneNumber, otp, purpose);
+      if (!verification.success) {
+        return res.status(400).json({
+          success: false,
+          error: verification.error
+        });
+      }
+
+      req.phoneNumber = verification.phoneNumber;
+      req.otpVerified = true;
+
+      // Mark recent authentication for sensitive operations
+      await AuthService.markRecentAuthentication(verification.phoneNumber);
+
+      next();
+    } catch (error) {
+      logger.error('OTP verification error:', error);
+      return res.status(500).json({
+        success: false,
+        error: 'Server error in OTP verification'
+      });
+    }
+  };
+};
+
 module.exports = {
   protect,
   authenticatePhone,
-  phoneRateLimit
+  phoneRateLimit,
+  authenticateSecureSession,
+  authorizeWalletOperation,
+  enhancedPhoneRateLimit,
+  verifyOTP
 };

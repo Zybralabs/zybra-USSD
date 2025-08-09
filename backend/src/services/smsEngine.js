@@ -111,18 +111,44 @@ class SMSService {
   }
 
   /**
-   * Send OTP for verification
+   * Send OTP for verification with enhanced security messaging
    * @param {string} phoneNumber - User's phone number
    * @param {string} otp - One-time password
+   * @param {string} purpose - Purpose of OTP (authentication, transaction, etc.)
    * @returns {Promise<Object>} - SMS response
    */
-  static async sendOTP(phoneNumber, otp) {
-    const message = `🔐 Your Zybra verification code is: ${otp}\n` +
-                   `This code expires in 5 minutes.\n` +
-                   `Do not share this code with anyone.\n` +
-                   `Zybra Security`;
+  static async sendOTP(phoneNumber, otp, purpose = 'authentication') {
+    const purposeMessages = {
+      authentication: 'login to your account',
+      transaction: 'confirm your transaction',
+      investment: 'confirm your investment',
+      withdrawal: 'confirm your withdrawal',
+      wallet_access: 'access your wallet'
+    };
 
-    return await this.sendSMS(phoneNumber, message);
+    const purposeText = purposeMessages[purpose] || 'verify your identity';
+
+    const message = `🔐 Zybra Security Code: ${otp}\n` +
+                   `Use this code to ${purposeText}.\n` +
+                   `Valid for 5 minutes only.\n` +
+                   `Never share this code!\n` +
+                   `If you didn't request this, contact support.`;
+
+    try {
+      const result = await this.sendSMS(phoneNumber, message);
+
+      // Log OTP sending for security audit
+      logger.info(`OTP sent for ${purpose}`, {
+        phoneNumber: phoneNumber.replace(/(\d{3})\d{6}(\d{3})/, '$1****$2'),
+        purpose,
+        timestamp: new Date().toISOString()
+      });
+
+      return result;
+    } catch (error) {
+      logger.error('Error sending OTP SMS:', error);
+      return { success: false, error: error.message };
+    }
   }
 
   /**

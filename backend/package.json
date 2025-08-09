@@ -6,9 +6,19 @@
   "scripts": {
     "start": "node app.js",
     "dev": "nodemon app.js",
+<<<<<<< HEAD
     "test": "jest",
     "test:watch": "jest --watch",
     "test:coverage": "jest --coverage",
+=======
+    "test": "node scripts/run-tests.js",
+    "test:unit": "node scripts/run-tests.js unit",
+    "test:integration": "node scripts/run-tests.js integration",
+    "test:api": "node scripts/run-tests.js api",
+    "test:coverage": "node scripts/run-tests.js coverage",
+    "test:watch": "jest --watch",
+    "test:jest": "jest",
+>>>>>>> e493750ee6533facd8eb627b1ad0498cb277d1f1
     "db:migrate": "node scripts/migrate.js",
     "db:seed": "node scripts/seed.js",
     "lint": "eslint .",
@@ -29,6 +39,12 @@
   "author": "Zybra Team",
   "license": "MIT",
   "dependencies": {
+<<<<<<< HEAD
+=======
+    "@morpho-org/blue-sdk": "^3.0.9",
+    "@morpho-org/blue-sdk-ethers": "^3.0.0",
+    "@morpho-org/morpho-ts": "^2.4.1",
+>>>>>>> e493750ee6533facd8eb627b1ad0498cb277d1f1
     "africastalking": "^0.6.0",
     "axios": "^1.6.0",
     "cors": "^2.8.5",

@@ -231,9 +231,236 @@ class USSDSession {
   }
 }
 
+<<<<<<< HEAD
+=======
+// Morpho Investment model
+class MorphoInvestment {
+  static async create(investmentData) {
+    const {
+      phoneNumber,
+      vaultAddress,
+      vaultName,
+      vaultSymbol,
+      assetSymbol,
+      shares,
+      assets,
+      initialInvestment,
+      currentApy,
+      metadata = {},
+      createdAt = new Date()
+    } = investmentData;
+
+    const query = `
+      INSERT INTO morpho_investments (
+        phone_number, vault_address, vault_name, vault_symbol, asset_symbol,
+        shares, assets, initial_investment, current_apy, metadata,
+        investment_date, last_updated, created_at, updated_at
+      )
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $11, $11, $11)
+      RETURNING *
+    `;
+    const values = [
+      phoneNumber, vaultAddress, vaultName, vaultSymbol, assetSymbol,
+      shares, assets, initialInvestment, currentApy, JSON.stringify(metadata),
+      createdAt
+    ];
+
+    try {
+      const result = await pool.query(query, values);
+      return result.rows[0];
+    } catch (error) {
+      logger.error('Error creating Morpho investment:', error);
+      throw error;
+    }
+  }
+
+  static async findByPhone(phoneNumber, status = 'active') {
+    const query = `
+      SELECT * FROM morpho_investments
+      WHERE phone_number = $1 AND status = $2
+      ORDER BY investment_date DESC
+    `;
+
+    try {
+      const result = await pool.query(query, [phoneNumber, status]);
+      return result.rows;
+    } catch (error) {
+      logger.error('Error finding Morpho investments by phone:', error);
+      throw error;
+    }
+  }
+
+  static async updatePosition(id, updateData) {
+    const { shares, assets, currentApy } = updateData;
+    const query = `
+      UPDATE morpho_investments
+      SET shares = $1, assets = $2, current_apy = $3, last_updated = NOW(), updated_at = NOW()
+      WHERE id = $4
+      RETURNING *
+    `;
+
+    try {
+      const result = await pool.query(query, [shares, assets, currentApy, id]);
+      return result.rows[0];
+    } catch (error) {
+      logger.error('Error updating Morpho investment position:', error);
+      throw error;
+    }
+  }
+
+  static async updateStatus(id, status) {
+    const query = `
+      UPDATE morpho_investments
+      SET status = $1, updated_at = NOW()
+      WHERE id = $2
+      RETURNING *
+    `;
+
+    try {
+      const result = await pool.query(query, [status, id]);
+      return result.rows[0];
+    } catch (error) {
+      logger.error('Error updating Morpho investment status:', error);
+      throw error;
+    }
+  }
+
+  static async findById(id) {
+    const query = 'SELECT * FROM morpho_investments WHERE id = $1';
+
+    try {
+      const result = await pool.query(query, [id]);
+      return result.rows[0] || null;
+    } catch (error) {
+      logger.error('Error finding Morpho investment by ID:', error);
+      throw error;
+    }
+  }
+
+  static async getTotalInvested(phoneNumber) {
+    const query = `
+      SELECT COALESCE(SUM(assets), 0) as total_invested
+      FROM morpho_investments
+      WHERE phone_number = $1 AND status = 'active'
+    `;
+
+    try {
+      const result = await pool.query(query, [phoneNumber]);
+      return parseFloat(result.rows[0].total_invested) || 0;
+    } catch (error) {
+      logger.error('Error getting total invested amount:', error);
+      throw error;
+    }
+  }
+}
+
+// YellowCard Transaction model
+class YellowCardTransaction {
+  static async create(transactionData) {
+    const {
+      phoneNumber,
+      yellowcardId,
+      transactionType,
+      fiatAmount,
+      fiatCurrency,
+      cryptoAmount,
+      cryptoCurrency,
+      exchangeRate,
+      paymentMethod,
+      countryCode,
+      status = 'pending',
+      yellowcardStatus,
+      webhookData = {},
+      customerData = {},
+      createdAt = new Date()
+    } = transactionData;
+
+    const query = `
+      INSERT INTO yellowcard_transactions (
+        phone_number, yellowcard_id, transaction_type, fiat_amount, fiat_currency,
+        crypto_amount, crypto_currency, exchange_rate, payment_method, country_code,
+        status, yellowcard_status, webhook_data, customer_data, created_at, updated_at
+      )
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $15)
+      RETURNING *
+    `;
+    const values = [
+      phoneNumber, yellowcardId, transactionType, fiatAmount, fiatCurrency,
+      cryptoAmount, cryptoCurrency, exchangeRate, paymentMethod, countryCode,
+      status, yellowcardStatus, JSON.stringify(webhookData), JSON.stringify(customerData), createdAt
+    ];
+
+    try {
+      const result = await pool.query(query, values);
+      return result.rows[0];
+    } catch (error) {
+      logger.error('Error creating YellowCard transaction:', error);
+      throw error;
+    }
+  }
+
+  static async findByYellowCardId(yellowcardId) {
+    const query = 'SELECT * FROM yellowcard_transactions WHERE yellowcard_id = $1';
+
+    try {
+      const result = await pool.query(query, [yellowcardId]);
+      return result.rows[0] || null;
+    } catch (error) {
+      logger.error('Error finding YellowCard transaction by ID:', error);
+      throw error;
+    }
+  }
+
+  static async findByPhone(phoneNumber, limit = 10) {
+    const query = `
+      SELECT * FROM yellowcard_transactions
+      WHERE phone_number = $1
+      ORDER BY created_at DESC
+      LIMIT $2
+    `;
+
+    try {
+      const result = await pool.query(query, [phoneNumber, limit]);
+      return result.rows;
+    } catch (error) {
+      logger.error('Error finding YellowCard transactions by phone:', error);
+      throw error;
+    }
+  }
+
+  static async updateStatus(yellowcardId, status, yellowcardStatus = null, webhookData = null) {
+    const query = `
+      UPDATE yellowcard_transactions
+      SET status = $1, yellowcard_status = $2, webhook_data = $3, updated_at = NOW()
+      WHERE yellowcard_id = $4
+      RETURNING *
+    `;
+
+    try {
+      const result = await pool.query(query, [
+        status,
+        yellowcardStatus,
+        webhookData ? JSON.stringify(webhookData) : null,
+        yellowcardId
+      ]);
+      return result.rows[0];
+    } catch (error) {
+      logger.error('Error updating YellowCard transaction status:', error);
+      throw error;
+    }
+  }
+}
+
+>>>>>>> e493750ee6533facd8eb627b1ad0498cb277d1f1
 module.exports = {
   pool,
   User,
   Transaction,
+<<<<<<< HEAD
   USSDSession
+=======
+  USSDSession,
+  MorphoInvestment,
+  YellowCardTransaction
+>>>>>>> e493750ee6533facd8eb627b1ad0498cb277d1f1
 };

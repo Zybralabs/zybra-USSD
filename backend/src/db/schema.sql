@@ -29,7 +29,11 @@ CREATE INDEX IF NOT EXISTS idx_users_wallet_address ON users(wallet_address);
 CREATE TABLE IF NOT EXISTS transactions (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     phone_number VARCHAR(20) NOT NULL,
+<<<<<<< HEAD
     type VARCHAR(20) NOT NULL CHECK (type IN ('transfer', 'deposit', 'withdrawal', 'receive')),
+=======
+    type VARCHAR(30) NOT NULL CHECK (type IN ('transfer', 'deposit', 'withdrawal', 'receive', 'morpho_investment', 'morpho_withdrawal', 'yellowcard_purchase', 'yellowcard_sale', 'pending_investment')),
+>>>>>>> e493750ee6533facd8eb627b1ad0498cb277d1f1
     amount DECIMAL(18, 8) NOT NULL,
     currency VARCHAR(10) NOT NULL DEFAULT 'ZrUSD',
     status VARCHAR(20) NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'completed', 'failed', 'cancelled')),
@@ -108,6 +112,81 @@ CREATE TABLE IF NOT EXISTS wallet_keys (
 -- Create index for wallet keys
 CREATE INDEX IF NOT EXISTS idx_wallet_keys_phone_number ON wallet_keys(phone_number);
 
+<<<<<<< HEAD
+=======
+-- Morpho Investments table
+CREATE TABLE IF NOT EXISTS morpho_investments (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    phone_number VARCHAR(20) NOT NULL,
+    vault_address VARCHAR(42) NOT NULL,
+    vault_name VARCHAR(100) NOT NULL,
+    vault_symbol VARCHAR(20) NOT NULL,
+    asset_symbol VARCHAR(20) NOT NULL,
+    shares DECIMAL(18, 8) NOT NULL DEFAULT 0,
+    assets DECIMAL(18, 8) NOT NULL DEFAULT 0,
+    initial_investment DECIMAL(18, 8) NOT NULL,
+    current_apy DECIMAL(8, 4) DEFAULT 0,
+    investment_date TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    last_updated TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    status VARCHAR(20) NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'withdrawn', 'partial')),
+    metadata JSONB DEFAULT '{}',
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
+-- Create indexes for morpho investments
+CREATE INDEX IF NOT EXISTS idx_morpho_investments_phone_number ON morpho_investments(phone_number);
+CREATE INDEX IF NOT EXISTS idx_morpho_investments_vault_address ON morpho_investments(vault_address);
+CREATE INDEX IF NOT EXISTS idx_morpho_investments_status ON morpho_investments(status);
+CREATE INDEX IF NOT EXISTS idx_morpho_investments_investment_date ON morpho_investments(investment_date);
+
+-- YellowCard Transactions table
+CREATE TABLE IF NOT EXISTS yellowcard_transactions (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    phone_number VARCHAR(20) NOT NULL,
+    yellowcard_id VARCHAR(100) UNIQUE NOT NULL,
+    transaction_type VARCHAR(20) NOT NULL CHECK (transaction_type IN ('collection', 'payment')),
+    fiat_amount DECIMAL(18, 2) NOT NULL,
+    fiat_currency VARCHAR(10) NOT NULL,
+    crypto_amount DECIMAL(18, 8),
+    crypto_currency VARCHAR(10) NOT NULL,
+    exchange_rate DECIMAL(18, 8),
+    payment_method VARCHAR(50),
+    country_code VARCHAR(5),
+    status VARCHAR(20) NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'processing', 'completed', 'failed', 'cancelled')),
+    yellowcard_status VARCHAR(50),
+    webhook_data JSONB DEFAULT '{}',
+    customer_data JSONB DEFAULT '{}',
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
+-- Create indexes for yellowcard transactions
+CREATE INDEX IF NOT EXISTS idx_yellowcard_transactions_phone_number ON yellowcard_transactions(phone_number);
+CREATE INDEX IF NOT EXISTS idx_yellowcard_transactions_yellowcard_id ON yellowcard_transactions(yellowcard_id);
+CREATE INDEX IF NOT EXISTS idx_yellowcard_transactions_status ON yellowcard_transactions(status);
+CREATE INDEX IF NOT EXISTS idx_yellowcard_transactions_type ON yellowcard_transactions(transaction_type);
+CREATE INDEX IF NOT EXISTS idx_yellowcard_transactions_created_at ON yellowcard_transactions(created_at);
+
+-- User Portfolio Summary table (for caching portfolio data)
+CREATE TABLE IF NOT EXISTS user_portfolios (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    phone_number VARCHAR(20) UNIQUE NOT NULL,
+    wallet_balance DECIMAL(18, 8) DEFAULT 0,
+    total_invested DECIMAL(18, 8) DEFAULT 0,
+    total_portfolio_value DECIMAL(18, 8) DEFAULT 0,
+    active_investments_count INTEGER DEFAULT 0,
+    total_yield_earned DECIMAL(18, 8) DEFAULT 0,
+    last_calculated TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
+-- Create indexes for user portfolios
+CREATE INDEX IF NOT EXISTS idx_user_portfolios_phone_number ON user_portfolios(phone_number);
+CREATE INDEX IF NOT EXISTS idx_user_portfolios_last_calculated ON user_portfolios(last_calculated);
+
+>>>>>>> e493750ee6533facd8eb627b1ad0498cb277d1f1
 -- System Configuration table
 CREATE TABLE IF NOT EXISTS system_config (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
@@ -123,7 +202,14 @@ INSERT INTO system_config (config_key, config_value, description) VALUES
 ('transaction_limits', '{"daily_limit": 10000, "single_transaction_limit": 5000, "currency": "ZrUSD"}', 'Transaction limits configuration'),
 ('sms_settings', '{"rate_limit_per_hour": 10, "otp_expiry_minutes": 5}', 'SMS service settings'),
 ('ussd_settings', '{"session_timeout_minutes": 5, "max_menu_depth": 10}', 'USSD service settings'),
+<<<<<<< HEAD
 ('blockchain_settings', '{"confirmation_blocks": 3, "gas_price_gwei": 20}', 'Blockchain interaction settings')
+=======
+('blockchain_settings', '{"confirmation_blocks": 3, "gas_price_gwei": 20}', 'Blockchain interaction settings'),
+('morpho_settings', '{"min_investment_usd": 10, "max_vaults_display": 5, "apy_refresh_minutes": 60}', 'Morpho protocol integration settings'),
+('yellowcard_settings', '{"min_purchase_kes": 1000, "supported_countries": ["KE", "NG", "UG", "TZ"], "webhook_timeout_seconds": 30}', 'YellowCard API integration settings'),
+('investment_settings', '{"risk_tolerance": "medium", "auto_reinvest": false, "portfolio_rebalance_days": 30}', 'Investment and portfolio management settings')
+>>>>>>> e493750ee6533facd8eb627b1ad0498cb277d1f1
 ON CONFLICT (config_key) DO NOTHING;
 
 -- Create triggers for updating updated_at timestamps
@@ -151,9 +237,24 @@ CREATE TRIGGER update_sms_logs_updated_at BEFORE UPDATE ON sms_logs
 CREATE TRIGGER update_system_config_updated_at BEFORE UPDATE ON system_config
     FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
 
+<<<<<<< HEAD
 -- Create views for common queries
 CREATE OR REPLACE VIEW user_transaction_summary AS
 SELECT 
+=======
+CREATE TRIGGER update_morpho_investments_updated_at BEFORE UPDATE ON morpho_investments
+    FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+
+CREATE TRIGGER update_yellowcard_transactions_updated_at BEFORE UPDATE ON yellowcard_transactions
+    FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+
+CREATE TRIGGER update_user_portfolios_updated_at BEFORE UPDATE ON user_portfolios
+    FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+
+-- Create views for common queries
+CREATE OR REPLACE VIEW user_transaction_summary AS
+SELECT
+>>>>>>> e493750ee6533facd8eb627b1ad0498cb277d1f1
     u.phone_number,
     u.wallet_address,
     u.balance,
@@ -163,6 +264,11 @@ SELECT
     COUNT(CASE WHEN t.status = 'failed' THEN 1 END) as failed_transactions,
     SUM(CASE WHEN t.type = 'transfer' AND t.status = 'completed' THEN t.amount ELSE 0 END) as total_sent,
     SUM(CASE WHEN t.type = 'receive' AND t.status = 'completed' THEN t.amount ELSE 0 END) as total_received,
+<<<<<<< HEAD
+=======
+    SUM(CASE WHEN t.type = 'morpho_investment' AND t.status = 'completed' THEN t.amount ELSE 0 END) as total_invested,
+    SUM(CASE WHEN t.type = 'morpho_withdrawal' AND t.status = 'completed' THEN t.amount ELSE 0 END) as total_withdrawn,
+>>>>>>> e493750ee6533facd8eb627b1ad0498cb277d1f1
     MAX(t.created_at) as last_transaction_date
 FROM users u
 LEFT JOIN transactions t ON u.phone_number = t.phone_number
@@ -170,7 +276,11 @@ GROUP BY u.phone_number, u.wallet_address, u.balance;
 
 -- Create view for daily transaction statistics
 CREATE OR REPLACE VIEW daily_transaction_stats AS
+<<<<<<< HEAD
 SELECT 
+=======
+SELECT
+>>>>>>> e493750ee6533facd8eb627b1ad0498cb277d1f1
     DATE(created_at) as transaction_date,
     type as transaction_type,
     status,
@@ -182,6 +292,58 @@ WHERE created_at >= CURRENT_DATE - INTERVAL '30 days'
 GROUP BY DATE(created_at), type, status
 ORDER BY transaction_date DESC, transaction_type;
 
+<<<<<<< HEAD
+=======
+-- Create view for user portfolio overview
+CREATE OR REPLACE VIEW user_portfolio_overview AS
+SELECT
+    u.phone_number,
+    u.wallet_address,
+    u.balance as wallet_balance,
+    COALESCE(SUM(mi.assets), 0) as total_invested,
+    COALESCE(COUNT(mi.id), 0) as active_investments,
+    (u.balance + COALESCE(SUM(mi.assets), 0)) as total_portfolio_value,
+    COALESCE(AVG(mi.current_apy), 0) as average_apy,
+    MAX(mi.last_updated) as last_investment_update
+FROM users u
+LEFT JOIN morpho_investments mi ON u.phone_number = mi.phone_number AND mi.status = 'active'
+GROUP BY u.phone_number, u.wallet_address, u.balance;
+
+-- Create view for investment performance tracking
+CREATE OR REPLACE VIEW investment_performance AS
+SELECT
+    mi.phone_number,
+    mi.vault_name,
+    mi.vault_symbol,
+    mi.asset_symbol,
+    mi.initial_investment,
+    mi.assets as current_value,
+    (mi.assets - mi.initial_investment) as unrealized_gain_loss,
+    ((mi.assets - mi.initial_investment) / mi.initial_investment * 100) as return_percentage,
+    mi.current_apy,
+    mi.investment_date,
+    EXTRACT(DAYS FROM (NOW() - mi.investment_date)) as days_invested
+FROM morpho_investments mi
+WHERE mi.status = 'active'
+ORDER BY mi.investment_date DESC;
+
+-- Create view for YellowCard transaction summary
+CREATE OR REPLACE VIEW yellowcard_summary AS
+SELECT
+    yt.phone_number,
+    COUNT(*) as total_transactions,
+    COUNT(CASE WHEN yt.status = 'completed' THEN 1 END) as completed_transactions,
+    COUNT(CASE WHEN yt.status = 'pending' THEN 1 END) as pending_transactions,
+    COUNT(CASE WHEN yt.status = 'failed' THEN 1 END) as failed_transactions,
+    SUM(CASE WHEN yt.transaction_type = 'collection' AND yt.status = 'completed' THEN yt.fiat_amount ELSE 0 END) as total_purchased_fiat,
+    SUM(CASE WHEN yt.transaction_type = 'collection' AND yt.status = 'completed' THEN yt.crypto_amount ELSE 0 END) as total_purchased_crypto,
+    SUM(CASE WHEN yt.transaction_type = 'payment' AND yt.status = 'completed' THEN yt.fiat_amount ELSE 0 END) as total_sold_fiat,
+    SUM(CASE WHEN yt.transaction_type = 'payment' AND yt.status = 'completed' THEN yt.crypto_amount ELSE 0 END) as total_sold_crypto,
+    MAX(yt.created_at) as last_transaction_date
+FROM yellowcard_transactions yt
+GROUP BY yt.phone_number;
+
+>>>>>>> e493750ee6533facd8eb627b1ad0498cb277d1f1
 -- Create function to clean up expired sessions
 CREATE OR REPLACE FUNCTION cleanup_expired_sessions()
 RETURNS INTEGER AS $$
@@ -208,7 +370,11 @@ RETURNS TABLE (
 ) AS $$
 BEGIN
     RETURN QUERY
+<<<<<<< HEAD
     SELECT 
+=======
+    SELECT
+>>>>>>> e493750ee6533facd8eb627b1ad0498cb277d1f1
         u.balance,
         COALESCE(
             json_agg(
@@ -226,9 +392,15 @@ BEGIN
         )::jsonb
     FROM users u
     LEFT JOIN (
+<<<<<<< HEAD
         SELECT * FROM transactions 
         WHERE phone_number = user_phone 
         ORDER BY created_at DESC 
+=======
+        SELECT * FROM transactions
+        WHERE phone_number = user_phone
+        ORDER BY created_at DESC
+>>>>>>> e493750ee6533facd8eb627b1ad0498cb277d1f1
         LIMIT 10
     ) t ON u.phone_number = t.phone_number
     WHERE u.phone_number = user_phone
@@ -236,6 +408,86 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
+<<<<<<< HEAD
+=======
+-- Create function to get user portfolio summary
+CREATE OR REPLACE FUNCTION get_user_portfolio_summary(user_phone VARCHAR(20))
+RETURNS TABLE (
+    wallet_balance DECIMAL(18, 8),
+    total_invested DECIMAL(18, 8),
+    total_portfolio_value DECIMAL(18, 8),
+    active_investments INTEGER,
+    portfolio_data JSONB
+) AS $$
+BEGIN
+    RETURN QUERY
+    SELECT
+        u.balance,
+        COALESCE(SUM(mi.assets), 0),
+        u.balance + COALESCE(SUM(mi.assets), 0),
+        COALESCE(COUNT(mi.id)::INTEGER, 0),
+        COALESCE(
+            json_agg(
+                json_build_object(
+                    'vault_name', mi.vault_name,
+                    'vault_symbol', mi.vault_symbol,
+                    'asset_symbol', mi.asset_symbol,
+                    'shares', mi.shares,
+                    'assets', mi.assets,
+                    'initial_investment', mi.initial_investment,
+                    'current_apy', mi.current_apy,
+                    'investment_date', mi.investment_date,
+                    'unrealized_gain', mi.assets - mi.initial_investment
+                )
+                ORDER BY mi.investment_date DESC
+            ) FILTER (WHERE mi.id IS NOT NULL),
+            '[]'::json
+        )::jsonb
+    FROM users u
+    LEFT JOIN morpho_investments mi ON u.phone_number = mi.phone_number AND mi.status = 'active'
+    WHERE u.phone_number = user_phone
+    GROUP BY u.balance;
+END;
+$$ LANGUAGE plpgsql;
+
+-- Create function to update portfolio cache
+CREATE OR REPLACE FUNCTION update_user_portfolio_cache(user_phone VARCHAR(20))
+RETURNS BOOLEAN AS $$
+DECLARE
+    portfolio_summary RECORD;
+BEGIN
+    -- Get current portfolio data
+    SELECT * INTO portfolio_summary FROM get_user_portfolio_summary(user_phone);
+
+    -- Update or insert portfolio cache
+    INSERT INTO user_portfolios (
+        phone_number,
+        wallet_balance,
+        total_invested,
+        total_portfolio_value,
+        active_investments_count,
+        last_calculated
+    ) VALUES (
+        user_phone,
+        portfolio_summary.wallet_balance,
+        portfolio_summary.total_invested,
+        portfolio_summary.total_portfolio_value,
+        portfolio_summary.active_investments,
+        NOW()
+    )
+    ON CONFLICT (phone_number) DO UPDATE SET
+        wallet_balance = EXCLUDED.wallet_balance,
+        total_invested = EXCLUDED.total_invested,
+        total_portfolio_value = EXCLUDED.total_portfolio_value,
+        active_investments_count = EXCLUDED.active_investments_count,
+        last_calculated = EXCLUDED.last_calculated,
+        updated_at = NOW();
+
+    RETURN TRUE;
+END;
+$$ LANGUAGE plpgsql;
+
+>>>>>>> e493750ee6533facd8eb627b1ad0498cb277d1f1
 -- Grant permissions (adjust as needed for your setup)
 -- GRANT ALL PRIVILEGES ON ALL TABLES IN SCHEMA public TO zybra_user;
 -- GRANT ALL PRIVILEGES ON ALL SEQUENCES IN SCHEMA public TO zybra_user;
@@ -247,11 +499,21 @@ $$ LANGUAGE plpgsql;
 -- ('254787654321', '0x0987654321098765432109876543210987654321', 50.00);
 
 COMMENT ON TABLE users IS 'Stores user account information including phone numbers and wallet addresses';
+<<<<<<< HEAD
 COMMENT ON TABLE transactions IS 'Records all financial transactions in the system';
+=======
+COMMENT ON TABLE transactions IS 'Records all financial transactions in the system including DeFi investments and YellowCard purchases';
+>>>>>>> e493750ee6533facd8eb627b1ad0498cb277d1f1
 COMMENT ON TABLE ussd_sessions IS 'Manages active USSD session state';
 COMMENT ON TABLE sms_logs IS 'Logs all SMS communications for analytics and debugging';
 COMMENT ON TABLE otp_verifications IS 'Manages OTP codes for user verification';
 COMMENT ON TABLE wallet_keys IS 'Securely stores encrypted private keys for user wallets';
+<<<<<<< HEAD
+=======
+COMMENT ON TABLE morpho_investments IS 'Tracks user investments in Morpho protocol vaults';
+COMMENT ON TABLE yellowcard_transactions IS 'Records YellowCard API transactions for crypto purchases and sales';
+COMMENT ON TABLE user_portfolios IS 'Cached portfolio summaries for improved performance';
+>>>>>>> e493750ee6533facd8eb627b1ad0498cb277d1f1
 COMMENT ON TABLE system_config IS 'System-wide configuration settings';
 
 -- End of schema
