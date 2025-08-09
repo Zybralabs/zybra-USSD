@@ -1,5 +1,7 @@
 const transactionService = require('../services/transactionService');
 const SMSService = require('../services/smsEngine');
+const KotaniPayService = require('../services/kotaniPayService');
+const YellowCardService = require('../services/yellowCardService');
 const logger = require('../utils/logger');
 const crypto = require('crypto');
 
@@ -111,6 +113,218 @@ class WebhookController {
 
     } catch (error) {
       logger.error('Error processing Airtel webhook:', error);
+      res.status(500).json({
+        success: false,
+        error: 'Failed to process webhook'
+      });
+    }
+  }
+
+  /**
+   * Handle Kotani Pay deposit webhook
+   * @param {Object} req - Express request object
+   * @param {Object} res - Express response object
+   */
+  static async handleKotaniPayDepositWebhook(req, res) {
+    try {
+      const webhookData = req.body;
+      logger.info('Kotani Pay deposit webhook received:', webhookData);
+
+      // Verify webhook signature if secret is configured
+      if (process.env.KOTANI_PAY_WEBHOOK_SECRET) {
+        const signature = req.headers['x-kotanipay-signature'];
+        const isValid = KotaniPayService.verifyWebhookSignature(
+          JSON.stringify(req.body),
+          signature
+        );
+
+        if (!isValid) {
+          logger.warn('Invalid Kotani Pay webhook signature');
+          return res.status(401).json({
+            success: false,
+            error: 'Invalid signature'
+          });
+        }
+      }
+
+      const {
+        transaction_id,
+        status,
+        amount,
+        currency,
+        customer_phone,
+        customer_key,
+        wallet_id,
+        reference
+      } = webhookData;
+
+      // Validate webhook data
+      if (!transaction_id || !status || !customer_phone) {
+        return res.status(400).json({
+          success: false,
+          error: 'Invalid webhook data'
+        });
+      }
+
+      // Process based on transaction status
+      switch (status.toLowerCase()) {
+        case 'success':
+        case 'completed':
+          // Process successful deposit
+          const result = await transactionService.processMobileMoneyDeposit(
+            customer_phone,
+            parseFloat(amount),
+            currency,
+            {
+              provider: 'kotanipay',
+              reference: reference || transaction_id,
+              transactionId: transaction_id,
+              customerKey: customer_key,
+              walletId: wallet_id
+            }
+          );
+
+          if (result.success) {
+            logger.info(`Kotani Pay deposit processed successfully for ${customer_phone}`);
+          } else {
+            logger.error(`Kotani Pay deposit failed for ${customer_phone}:`, result.error);
+          }
+          break;
+
+        case 'failed':
+        case 'error':
+          // Handle failed deposit
+          logger.warn(`Kotani Pay deposit failed for ${customer_phone}: ${status}`);
+
+          // Send failure notification
+          await SMSService.sendErrorNotification(
+            customer_phone,
+            `Deposit failed: ${status}. Please try again or contact support.`
+          );
+          break;
+
+        case 'pending':
+        case 'processing':
+          // Handle pending deposit
+          logger.info(`Kotani Pay deposit pending for ${customer_phone}: ${status}`);
+
+          // Send pending notification
+          await SMSService.sendSMS(
+            customer_phone,
+            `Your deposit of ${amount} ${currency} is being processed. You'll be notified once completed.`
+          );
+          break;
+
+        default:
+          logger.warn(`Unknown Kotani Pay deposit status: ${status}`);
+      }
+
+      res.status(200).json({
+        success: true,
+        message: 'Webhook processed'
+      });
+
+    } catch (error) {
+      logger.error('Error processing Kotani Pay deposit webhook:', error);
+      res.status(500).json({
+        success: false,
+        error: 'Failed to process webhook'
+      });
+    }
+  }
+
+  /**
+   * Handle Kotani Pay withdrawal webhook
+   * @param {Object} req - Express request object
+   * @param {Object} res - Express response object
+   */
+  static async handleKotaniPayWithdrawalWebhook(req, res) {
+    try {
+      const webhookData = req.body;
+      logger.info('Kotani Pay withdrawal webhook received:', webhookData);
+
+      // Verify webhook signature if secret is configured
+      if (process.env.KOTANI_PAY_WEBHOOK_SECRET) {
+        const signature = req.headers['x-kotanipay-signature'];
+        const isValid = KotaniPayService.verifyWebhookSignature(
+          JSON.stringify(req.body),
+          signature
+        );
+
+        if (!isValid) {
+          logger.warn('Invalid Kotani Pay webhook signature');
+          return res.status(401).json({
+            success: false,
+            error: 'Invalid signature'
+          });
+        }
+      }
+
+      const {
+        transaction_id,
+        status,
+        amount,
+        currency,
+        customer_phone,
+        customer_key,
+        wallet_id,
+        reference
+      } = webhookData;
+
+      // Validate webhook data
+      if (!transaction_id || !status || !customer_phone) {
+        return res.status(400).json({
+          success: false,
+          error: 'Invalid webhook data'
+        });
+      }
+
+      // Process based on transaction status
+      switch (status.toLowerCase()) {
+        case 'success':
+        case 'completed':
+          // Handle successful withdrawal
+          logger.info(`Kotani Pay withdrawal completed for ${customer_phone}`);
+          await SMSService.sendTransactionConfirmation(customer_phone, {
+            type: 'withdrawal',
+            amount: parseFloat(amount),
+            currency,
+            status: 'completed',
+            txHash: transaction_id
+          });
+          break;
+
+        case 'failed':
+        case 'error':
+          // Handle failed withdrawal
+          logger.warn(`Kotani Pay withdrawal failed for ${customer_phone}: ${status}`);
+          await SMSService.sendErrorNotification(
+            customer_phone,
+            `Withdrawal failed: ${status}. Please contact support if funds were deducted.`
+          );
+          break;
+
+        case 'pending':
+        case 'processing':
+          // Handle pending withdrawal
+          logger.info(`Kotani Pay withdrawal pending for ${customer_phone}: ${status}`);
+          await SMSService.sendSMS(
+            customer_phone,
+            `Your withdrawal of ${amount} ${currency} is being processed. You'll receive the funds shortly.`
+          );
+          break;
+
+        default:
+          logger.warn(`Unknown Kotani Pay withdrawal status: ${status}`);
+      }
+
+      res.status(200).json({
+        success: true,
+        message: 'Webhook processed'
+      });
+
+    } catch (error) {
+      logger.error('Error processing Kotani Pay withdrawal webhook:', error);
       res.status(500).json({
         success: false,
         error: 'Failed to process webhook'

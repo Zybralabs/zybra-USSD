@@ -89,7 +89,7 @@ async function testSMSSending() {
 async function testUSSDSimulation() {
   // Simulate USSD session
   const sessionId = `TEST_${Date.now()}`;
-  
+
   // Test main menu
   const mainMenuResponse = await apiCall('POST', '/api/ussd', {
     sessionId,
@@ -97,11 +97,11 @@ async function testUSSDSimulation() {
     phoneNumber: TEST_PHONE,
     text: ''
   });
-  
+
   if (!mainMenuResponse.includes('Welcome')) {
     throw new Error('USSD main menu test failed');
   }
-  
+
   // Test balance check
   const balanceResponse = await apiCall('POST', '/api/ussd', {
     sessionId,
@@ -109,9 +109,33 @@ async function testUSSDSimulation() {
     phoneNumber: TEST_PHONE,
     text: '1'
   });
-  
+
   if (!balanceResponse.includes('Balance')) {
     throw new Error('USSD balance check test failed');
+  }
+
+  // Test deposit provider selection
+  const depositMenuResponse = await apiCall('POST', '/api/ussd', {
+    sessionId: `TEST_DEP_${Date.now()}`,
+    serviceCode: '*384*96#',
+    phoneNumber: TEST_PHONE,
+    text: '3'
+  });
+
+  if (!depositMenuResponse.includes('Mobile Money')) {
+    throw new Error('USSD deposit menu test failed');
+  }
+
+  // Test provider selection
+  const providerMenuResponse = await apiCall('POST', '/api/ussd', {
+    sessionId: `TEST_PROV_${Date.now()}`,
+    serviceCode: '*384*96#',
+    phoneNumber: TEST_PHONE,
+    text: '3*1'
+  });
+
+  if (!providerMenuResponse.includes('Kotani Pay') || !providerMenuResponse.includes('Yellow Card')) {
+    throw new Error('USSD provider selection test failed');
   }
 }
 
@@ -159,19 +183,53 @@ async function testWebhookEndpoints() {
   }
 }
 
+async function testKotaniPayIntegration() {
+  // Test Kotani Pay health
+  const healthResponse = await apiCall('GET', '/api/kotanipay/health');
+  if (!healthResponse.success) {
+    throw new Error('Kotani Pay health check failed');
+  }
+
+  // Test supported currencies
+  const currenciesResponse = await apiCall('GET', '/api/kotanipay/currencies');
+  if (!currenciesResponse.success || !currenciesResponse.data.currencies) {
+    throw new Error('Kotani Pay currencies retrieval failed');
+  }
+
+  // Test supported countries
+  const countriesResponse = await apiCall('GET', '/api/kotanipay/countries');
+  if (!countriesResponse.success || !countriesResponse.data.countries) {
+    throw new Error('Kotani Pay countries retrieval failed');
+  }
+}
+
+async function testYellowCardIntegration() {
+  // Test Yellow Card health
+  const healthResponse = await apiCall('GET', '/api/yellowcard/health');
+  if (!healthResponse.success) {
+    throw new Error('Yellow Card health check failed');
+  }
+
+  // Test supported currencies
+  const currenciesResponse = await apiCall('GET', '/api/yellowcard/currencies');
+  if (!currenciesResponse.success || !currenciesResponse.data.currencies) {
+    throw new Error('Yellow Card currencies retrieval failed');
+  }
+}
+
 async function testSystemStats() {
   // Test SMS stats
   const smsStats = await apiCall('GET', '/api/sms/stats');
   if (!smsStats.success) {
     throw new Error('SMS stats retrieval failed');
   }
-  
+
   // Test USSD stats
   const ussdStats = await apiCall('GET', '/api/ussd/stats');
   if (!ussdStats.success) {
     throw new Error('USSD stats retrieval failed');
   }
-  
+
   // Test transaction stats
   const txStats = await apiCall('GET', '/api/transactions/stats/overview');
   if (!txStats.success) {
@@ -228,6 +286,10 @@ async function runAllTests() {
   await runTest('Transaction History', testTransactionHistory);
   await runTest('Webhook Endpoints', testWebhookEndpoints);
   await runTest('System Statistics', testSystemStats);
+
+  // Payment provider integration tests
+  await runTest('Kotani Pay Integration', testKotaniPayIntegration);
+  await runTest('Yellow Card Integration', testYellowCardIntegration);
   
   // Print results
   console.log(colors.cyan('📊 Test Results Summary:'));

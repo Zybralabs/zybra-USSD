@@ -114,7 +114,19 @@ class USSDService {
         return await this.handleSendConfirmMenu(userInput, sessionData, phoneNumber);
 
       case 'receive_money':
-        return await this.handleReceiveMoneyMenu(userInput, phoneNumber);
+        return await this.handleReceiveMoneyMenu(userInput, sessionData, phoneNumber);
+
+      case 'deposit_method':
+        return await this.handleReceiveMoneyMenu(userInput, sessionData, phoneNumber);
+
+      case 'deposit_provider':
+        return await this.handleDepositProviderMenu(userInput, sessionData, phoneNumber);
+
+      case 'deposit_currency':
+        return await this.handleDepositCurrencyMenu(userInput, sessionData, phoneNumber);
+
+      case 'deposit_amount':
+        return await this.handleDepositAmountMenu(userInput, sessionData, phoneNumber);
 
       case 'transaction_history':
         return await this.handleTransactionHistoryMenu(userInput, phoneNumber);
@@ -1156,18 +1168,276 @@ class USSDService {
   }
 
   /**
-   * Handle receive money menu
+   * Handle receive money menu (Mobile Money Deposit)
    * @param {string} userInput - User input
+   * @param {Object} sessionData - Current session data
    * @param {string} phoneNumber - User's phone number
    * @returns {Promise<Object>} - Menu response
    */
-  static async handleReceiveMoneyMenu(userInput, phoneNumber) {
-    const user = await User.findByPhone(phoneNumber);
+  static async handleReceiveMoneyMenu(userInput, sessionData, phoneNumber) {
+    if (!userInput) {
+      // Show deposit options
+      return {
+        text: `CON Deposit Money 📥\n\nChoose deposit method:\n1. Mobile Money\n2. Show Wallet Details\n0. Back to main menu`,
+        continue: true,
+        nextMenu: 'deposit_method',
+        sessionData: {}
+      };
+    }
+
+    switch (userInput) {
+      case '1':
+        // Mobile Money deposit - show provider options
+        return {
+          text: `CON Mobile Money Providers 💰\n\nSelect provider:\n1. Kotani Pay (KE, UG, TZ, GH, NG)\n2. Yellow Card (NG, GH, KE, UG, TZ+)\n0. Back`,
+          continue: true,
+          nextMenu: 'deposit_provider',
+          sessionData: {}
+        };
+
+      case '2':
+        // Show wallet details
+        const user = await User.findByPhone(phoneNumber);
+        return {
+          text: `END Your Wallet Details 📋\n\nPhone: ${phoneNumber}\nWallet: ${user?.wallet_address?.substring(0, 20)}...\n\nShare these details to receive direct transfers.`,
+          continue: false
+        };
+
+      case '0':
+        return { text: '', continue: true, nextMenu: 'main', sessionData: {} };
+
+      default:
+        return {
+          text: `CON Invalid option. Choose deposit method:\n1. Mobile Money\n2. Show Wallet Details\n0. Back to main menu`,
+          continue: true,
+          nextMenu: 'deposit_method',
+          sessionData: {}
+        };
+    }
+  }
+
+  /**
+   * Handle deposit provider selection
+   * @param {string} userInput - User input
+   * @param {Object} sessionData - Current session data
+   * @param {string} phoneNumber - User's phone number
+   * @returns {Promise<Object>} - Menu response
+   */
+  static async handleDepositProviderMenu(userInput, sessionData, phoneNumber) {
+    if (userInput === '0') {
+      return { text: '', continue: true, nextMenu: 'receive_money', sessionData: {} };
+    }
+
+    let provider, currencies;
+
+    switch (userInput) {
+      case '1':
+        // Kotani Pay
+        provider = 'kotanipay';
+        currencies = [
+          { code: 'KES', name: 'Kenyan Shilling', country: 'Kenya' },
+          { code: 'UGX', name: 'Ugandan Shilling', country: 'Uganda' },
+          { code: 'TZS', name: 'Tanzanian Shilling', country: 'Tanzania' },
+          { code: 'GHS', name: 'Ghanaian Cedi', country: 'Ghana' },
+          { code: 'NGN', name: 'Nigerian Naira', country: 'Nigeria' }
+        ];
+        break;
+
+      case '2':
+        // Yellow Card
+        provider = 'yellowcard';
+        currencies = [
+          { code: 'NGN', name: 'Nigerian Naira', country: 'Nigeria' },
+          { code: 'GHS', name: 'Ghanaian Cedi', country: 'Ghana' },
+          { code: 'KES', name: 'Kenyan Shilling', country: 'Kenya' },
+          { code: 'UGX', name: 'Ugandan Shilling', country: 'Uganda' },
+          { code: 'TZS', name: 'Tanzanian Shilling', country: 'Tanzania' },
+          { code: 'ZAR', name: 'South African Rand', country: 'South Africa' }
+        ];
+        break;
+
+      default:
+        return {
+          text: `CON Invalid option. Select provider:\n1. Kotani Pay (KE, UG, TZ, GH, NG)\n2. Yellow Card (NG, GH, KE, UG, TZ+)\n0. Back`,
+          continue: true,
+          nextMenu: 'deposit_provider',
+          sessionData: {}
+        };
+    }
+
+    // Build currency menu
+    let currencyText = `CON ${provider === 'kotanipay' ? 'Kotani Pay' : 'Yellow Card'} Deposit 💰\n\nSelect currency:\n`;
+    currencies.forEach((curr, index) => {
+      currencyText += `${index + 1}. ${curr.code} (${curr.country})\n`;
+    });
+    currencyText += '0. Back';
 
     return {
-      text: `END Receive Money 📥\n\nYour Details:\nPhone: ${phoneNumber}\nWallet: ${user?.wallet_address?.substring(0, 20)}...\n\nShare these details to receive money.`,
-      continue: false
+      text: currencyText,
+      continue: true,
+      nextMenu: 'deposit_currency',
+      sessionData: { provider, currencies }
     };
+  }
+
+  /**
+   * Handle deposit currency selection
+   * @param {string} userInput - User input
+   * @param {Object} sessionData - Current session data
+   * @param {string} phoneNumber - User's phone number
+   * @returns {Promise<Object>} - Menu response
+   */
+  static async handleDepositCurrencyMenu(userInput, sessionData, phoneNumber) {
+    const { provider, currencies } = sessionData;
+
+    if (userInput === '0') {
+      return { text: '', continue: true, nextMenu: 'deposit_provider', sessionData: {} };
+    }
+
+    const currencyIndex = parseInt(userInput) - 1;
+    if (currencyIndex < 0 || currencyIndex >= currencies.length) {
+      // Rebuild currency menu
+      let currencyText = `CON ${provider === 'kotanipay' ? 'Kotani Pay' : 'Yellow Card'} Deposit 💰\n\nSelect currency:\n`;
+      currencies.forEach((curr, index) => {
+        currencyText += `${index + 1}. ${curr.code} (${curr.country})\n`;
+      });
+      currencyText += '0. Back';
+
+      return {
+        text: currencyText,
+        continue: true,
+        nextMenu: 'deposit_currency',
+        sessionData: { provider, currencies }
+      };
+    }
+
+    const selectedCurrency = currencies[currencyIndex];
+    const minAmount = this.getMinimumAmount(selectedCurrency.code);
+
+    return {
+      text: `CON Enter amount in ${selectedCurrency.code}:\n(Minimum: ${minAmount} ${selectedCurrency.code})\n\nProvider: ${provider === 'kotanipay' ? 'Kotani Pay' : 'Yellow Card'}`,
+      continue: true,
+      nextMenu: 'deposit_amount',
+      sessionData: {
+        provider,
+        currency: selectedCurrency.code,
+        currencyName: selectedCurrency.name,
+        countryCode: this.getCountryCodeFromCurrency(selectedCurrency.code)
+      }
+    };
+  }
+
+  /**
+   * Handle deposit amount entry
+   * @param {string} userInput - User input
+   * @param {Object} sessionData - Current session data
+   * @param {string} phoneNumber - User's phone number
+   * @returns {Promise<Object>} - Menu response
+   */
+  static async handleDepositAmountMenu(userInput, sessionData, phoneNumber) {
+    const { provider, currency, countryCode } = sessionData;
+
+    if (!userInput) {
+      return {
+        text: `CON Enter amount in ${currency}:\n(Minimum: ${this.getMinimumAmount(currency)} ${currency})\n\nProvider: ${provider === 'kotanipay' ? 'Kotani Pay' : 'Yellow Card'}`,
+        continue: true,
+        nextMenu: 'deposit_amount',
+        sessionData
+      };
+    }
+
+    const amount = parseFloat(userInput);
+    const minAmount = this.getMinimumAmount(currency);
+
+    if (isNaN(amount) || amount < minAmount) {
+      return {
+        text: `CON Invalid amount. Enter amount in ${currency}:\n(Minimum: ${minAmount} ${currency})\n\nProvider: ${provider === 'kotanipay' ? 'Kotani Pay' : 'Yellow Card'}`,
+        continue: true,
+        nextMenu: 'deposit_amount',
+        sessionData
+      };
+    }
+
+    // Initiate deposit based on provider
+    try {
+      const transactionService = require('./transactionService');
+      let result;
+
+      if (provider === 'kotanipay') {
+        result = await transactionService.initiateKotaniPayDeposit(phoneNumber, amount, currency);
+
+        if (result.success) {
+          return {
+            text: `END Kotani Pay Deposit Initiated! 🎉\n\nAmount: ${amount} ${currency}\nTransaction ID: ${result.kotaniPayTransactionId}\n\nYou'll receive SMS instructions shortly. Follow the prompts to complete payment.`,
+            continue: false
+          };
+        }
+      } else if (provider === 'yellowcard') {
+        result = await transactionService.initiateYellowCardDeposit(phoneNumber, amount, currency, countryCode);
+
+        if (result.success) {
+          return {
+            text: `END Yellow Card Deposit Initiated! 🎉\n\nAmount: ${amount} ${currency}\nCollection ID: ${result.collectionId}\n\nYou'll receive SMS instructions shortly. Follow the prompts to complete payment.`,
+            continue: false
+          };
+        }
+      }
+
+      // Handle failure
+      return {
+        text: `END Deposit Failed ❌\n\nProvider: ${provider === 'kotanipay' ? 'Kotani Pay' : 'Yellow Card'}\nReason: ${result?.error || 'Unknown error'}\n\nPlease try again or contact support.`,
+        continue: false
+      };
+
+    } catch (error) {
+      logger.error('Error initiating deposit:', error);
+      return {
+        text: `END Service Error ⚠️\n\nUnable to process deposit request. Please try again later.`,
+        continue: false
+      };
+    }
+  }
+
+  /**
+   * Get minimum deposit amount for currency
+   * @param {string} currency - Currency code
+   * @returns {number} - Minimum amount
+   */
+  static getMinimumAmount(currency) {
+    const minimums = {
+      'KES': 10,
+      'UGX': 1000,
+      'TZS': 1000,
+      'GHS': 1,
+      'NGN': 100,
+      'ZAR': 10,
+      'EGP': 10,
+      'MAD': 10,
+      'TND': 1,
+      'DZD': 100
+    };
+    return minimums[currency] || 1;
+  }
+
+  /**
+   * Get country code from currency
+   * @param {string} currency - Currency code
+   * @returns {string} - Country code
+   */
+  static getCountryCodeFromCurrency(currency) {
+    const currencyToCountry = {
+      'KES': 'KE', // Kenya
+      'UGX': 'UG', // Uganda
+      'TZS': 'TZ', // Tanzania
+      'GHS': 'GH', // Ghana
+      'NGN': 'NG', // Nigeria
+      'ZAR': 'ZA', // South Africa
+      'EGP': 'EG', // Egypt
+      'MAD': 'MA', // Morocco
+      'TND': 'TN', // Tunisia
+      'DZD': 'DZ'  // Algeria
+    };
+    return currencyToCountry[currency] || 'NG';
   }
 
   /**

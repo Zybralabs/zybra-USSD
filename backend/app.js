@@ -10,6 +10,8 @@ const smsRoutes = require('./src/routes/smsRoutes');
 const ussdRoutes = require('./src/routes/ussdRoutes');
 const webhookRoutes = require('./src/routes/webhookRoutes');
 const transactionRoutes = require('./src/routes/transactionRoutes');
+const kotaniPayRoutes = require('./src/routes/kotaniPayRoutes');
+const yellowCardRoutes = require('./src/routes/yellowCardRoutes');
 
 // Import middleware
 const errorHandler = require('./src/middleware/errorHandler');
@@ -54,14 +56,12 @@ app.get('/health', (req, res) => {
 });
 
 // API routes
-<<<<<<< HEAD
-=======
-app.use('/api/auth', require('./src/routes/authRoutes'));
->>>>>>> e493750ee6533facd8eb627b1ad0498cb277d1f1
 app.use('/api/sms', smsRoutes);
 app.use('/api/ussd', ussdRoutes);
 app.use('/api/webhooks', webhookRoutes);
 app.use('/api/transactions', authMiddleware, transactionRoutes);
+app.use('/api/kotanipay', kotaniPayRoutes);
+app.use('/api/yellowcard', yellowCardRoutes);
 
 // Validation error handling middleware
 app.use(handleValidationError);
@@ -80,6 +80,8 @@ app.listen(PORT, () => {
   console.log(`📱 SMS endpoint: http://localhost:${PORT}/api/sms`);
   console.log(`📞 USSD endpoint: http://localhost:${PORT}/api/ussd`);
   console.log(`🔗 Webhooks endpoint: http://localhost:${PORT}/api/webhooks`);
+  console.log(`💰 Kotani Pay endpoint: http://localhost:${PORT}/api/kotanipay`);
+  console.log(`💳 Yellow Card endpoint: http://localhost:${PORT}/api/yellowcard`);
 });
 
 module.exports = app;

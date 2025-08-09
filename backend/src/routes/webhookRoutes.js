@@ -15,6 +15,18 @@ router.post('/airtel',
 );
 
 /**
+ * Handle Kotani Pay deposit webhook
+ * POST /api/webhooks/kotanipay/deposit
+ */
+router.post('/kotanipay/deposit', WebhookController.handleKotaniPayDepositWebhook);
+
+/**
+ * Handle Kotani Pay withdrawal webhook
+ * POST /api/webhooks/kotanipay/withdrawal
+ */
+router.post('/kotanipay/withdrawal', WebhookController.handleKotaniPayWithdrawalWebhook);
+
+/**
  * Handle Yellow Card webhook
  * POST /api/webhooks/yellowcard
  */

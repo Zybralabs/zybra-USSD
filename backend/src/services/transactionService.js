@@ -2,6 +2,8 @@ const logger = require('../utils/logger');
 const { Transaction, User } = require('../db/models');
 const walletService = require('./walletService');
 const SMSService = require('./smsEngine');
+const KotaniPayService = require('./kotaniPayService');
+const YellowCardService = require('./yellowCardService');
 const { convertMWKtoUSDC } = require('./fxEngine');
 
 class TransactionService {
@@ -156,16 +158,30 @@ class TransactionService {
         status: 'pending',
         metadata: {
           paymentProvider: paymentData.provider,
-          paymentReference: paymentData.reference
+          paymentReference: paymentData.reference,
+          kotaniPayTransactionId: paymentData.transactionId,
+          kotaniPayCustomerKey: paymentData.customerKey,
+          kotaniPayWalletId: paymentData.walletId,
+          yellowCardCollectionId: paymentData.yellowCardCollectionId,
+          yellowCardCustomerId: paymentData.yellowCardCustomerId
         }
       });
 
       // Convert to USDC equivalent
       const usdcAmount = await this.convertToZrUSD(amount, currency);
 
-      // Verify payment with mobile money provider
-      const paymentVerified = await this.verifyMobileMoneyPayment(paymentData);
-      
+      // Handle different payment providers
+      let paymentVerified = false;
+
+      if (paymentData.provider === 'kotanipay' || paymentData.provider === 'yellowcard') {
+        // For Kotani Pay and Yellow Card, verification is handled by webhook
+        // The webhook will call this method after payment verification
+        paymentVerified = true;
+      } else {
+        // Verify payment with other mobile money providers
+        paymentVerified = await this.verifyMobileMoneyPayment(paymentData);
+      }
+
       if (!paymentVerified) {
         throw new Error('Payment verification failed');
       }
@@ -204,7 +220,7 @@ class TransactionService {
 
       if (transaction) {
         await Transaction.updateStatus(transaction.id, 'failed');
-        
+
         await SMSService.sendTransactionConfirmation(phoneNumber, {
           type: 'deposit',
           amount,
@@ -244,7 +260,13 @@ class TransactionService {
         metadata: {
           targetCurrency,
           withdrawalMethod: withdrawalData.method,
-          withdrawalAccount: withdrawalData.account
+          withdrawalAccount: withdrawalData.account,
+          paymentProvider: withdrawalData.provider,
+          kotaniPayTransactionId: withdrawalData.kotaniPayTransactionId,
+          kotaniPayCustomerKey: withdrawalData.kotaniPayCustomerKey,
+          kotaniPayWalletId: withdrawalData.kotaniPayWalletId,
+          yellowCardDisbursementId: withdrawalData.yellowCardDisbursementId,
+          yellowCardCustomerId: withdrawalData.yellowCardCustomerId
         }
       });
 
@@ -412,6 +434,401 @@ class TransactionService {
       logger.error('Error getting transaction history:', error);
       throw error;
     }
+  }
+
+  /**
+   * Initiate Kotani Pay mobile money deposit
+   * @param {string} phoneNumber - User's phone number
+   * @param {number} amount - Amount to deposit
+   * @param {string} currency - Source currency
+   * @returns {Promise<Object>} - Deposit initiation result
+   */
+  async initiateKotaniPayDeposit(phoneNumber, amount, currency) {
+    try {
+      // Ensure user exists
+      let user = await User.findByPhone(phoneNumber);
+      if (!user) {
+        const walletService = require('./walletService');
+        user = await walletService.createUserWallet(phoneNumber);
+      }
+
+      // Get or create Kotani Pay customer
+      let customerResult = await KotaniPayService.getMobileMoneyCustomerByPhone(phoneNumber);
+
+      if (!customerResult.success || customerResult.notFound) {
+        // Create new customer
+        customerResult = await KotaniPayService.createMobileMoneyCustomer({
+          phoneNumber,
+          firstName: 'Zybra',
+          lastName: 'User',
+          country: this.getCountryFromPhone(phoneNumber)
+        });
+
+        if (!customerResult.success) {
+          throw new Error(`Failed to create Kotani Pay customer: ${customerResult.error}`);
+        }
+      }
+
+      // Get or create fiat wallet for the currency
+      const walletResult = await KotaniPayService.getFiatWalletByCurrency(currency);
+      let walletId;
+
+      if (!walletResult.success) {
+        // Create new fiat wallet
+        const createWalletResult = await KotaniPayService.createFiatWallet(currency);
+        if (!createWalletResult.success) {
+          throw new Error(`Failed to create Kotani Pay wallet: ${createWalletResult.error}`);
+        }
+        walletId = createWalletResult.walletId;
+      } else {
+        walletId = walletResult.walletId;
+      }
+
+      // Initiate deposit
+      const depositResult = await KotaniPayService.initiateMobileMoneyDeposit({
+        phoneNumber,
+        amount,
+        currency,
+        customerKey: customerResult.data.customer_key,
+        walletId,
+        callbackUrl: `${process.env.BASE_URL}/api/webhooks/kotanipay/deposit`
+      });
+
+      if (!depositResult.success) {
+        throw new Error(`Failed to initiate Kotani Pay deposit: ${depositResult.error}`);
+      }
+
+      // Create pending transaction record
+      const transaction = await Transaction.create({
+        phoneNumber,
+        type: 'deposit',
+        amount,
+        currency,
+        status: 'pending',
+        metadata: {
+          paymentProvider: 'kotanipay',
+          kotaniPayTransactionId: depositResult.transactionId,
+          kotaniPayCustomerKey: customerResult.data.customer_key,
+          kotaniPayWalletId: walletId
+        }
+      });
+
+      logger.info(`Initiated Kotani Pay deposit for ${phoneNumber}: ${amount} ${currency}`);
+
+      return {
+        success: true,
+        transactionId: transaction.id,
+        kotaniPayTransactionId: depositResult.transactionId,
+        status: depositResult.status,
+        instructions: depositResult.instructions,
+        amount,
+        currency
+      };
+
+    } catch (error) {
+      logger.error('Error initiating Kotani Pay deposit:', error);
+      return {
+        success: false,
+        error: error.message
+      };
+    }
+  }
+
+  /**
+   * Initiate Kotani Pay mobile money withdrawal
+   * @param {string} phoneNumber - User's phone number
+   * @param {number} amount - Amount to withdraw in ZrUSD
+   * @param {string} targetCurrency - Target currency
+   * @returns {Promise<Object>} - Withdrawal initiation result
+   */
+  async initiateKotaniPayWithdrawal(phoneNumber, amount, targetCurrency) {
+    try {
+      // Check user balance
+      const user = await User.findByPhone(phoneNumber);
+      if (!user) {
+        throw new Error('User not found');
+      }
+
+      const currentBalance = parseFloat(user.balance || 0);
+      if (currentBalance < amount) {
+        throw new Error(`Insufficient balance. Available: ${currentBalance}, Required: ${amount}`);
+      }
+
+      // Get Kotani Pay customer
+      const customerResult = await KotaniPayService.getMobileMoneyCustomerByPhone(phoneNumber);
+      if (!customerResult.success) {
+        throw new Error(`Kotani Pay customer not found: ${customerResult.error}`);
+      }
+
+      // Get fiat wallet for target currency
+      const walletResult = await KotaniPayService.getFiatWalletByCurrency(targetCurrency);
+      if (!walletResult.success) {
+        throw new Error(`Kotani Pay wallet not found for ${targetCurrency}: ${walletResult.error}`);
+      }
+
+      // Convert ZrUSD to target currency
+      const targetAmount = await this.convertFromZrUSD(amount, targetCurrency);
+
+      // Burn ZrUSD tokens first
+      const burnResult = await walletService.burnZrUSD(phoneNumber, amount.toString());
+      if (!burnResult.success) {
+        throw new Error('Token burning failed');
+      }
+
+      // Initiate withdrawal
+      const withdrawalResult = await KotaniPayService.initiateMobileMoneyWithdrawal({
+        phoneNumber,
+        amount: targetAmount,
+        currency: targetCurrency,
+        customerKey: customerResult.data.customer_key,
+        walletId: walletResult.walletId,
+        callbackUrl: `${process.env.BASE_URL}/api/webhooks/kotanipay/withdrawal`
+      });
+
+      if (!withdrawalResult.success) {
+        // Re-mint tokens if withdrawal initiation failed
+        await walletService.mintZrUSD(phoneNumber, amount.toString());
+        throw new Error(`Failed to initiate Kotani Pay withdrawal: ${withdrawalResult.error}`);
+      }
+
+      // Create transaction record
+      const transaction = await Transaction.create({
+        phoneNumber,
+        type: 'withdrawal',
+        amount: targetAmount,
+        currency: targetCurrency,
+        status: 'pending',
+        txHash: burnResult.txHash,
+        metadata: {
+          paymentProvider: 'kotanipay',
+          kotaniPayTransactionId: withdrawalResult.transactionId,
+          kotaniPayCustomerKey: customerResult.data.customer_key,
+          kotaniPayWalletId: walletResult.walletId,
+          originalAmount: amount,
+          originalCurrency: 'ZrUSD'
+        }
+      });
+
+      logger.info(`Initiated Kotani Pay withdrawal for ${phoneNumber}: ${targetAmount} ${targetCurrency}`);
+
+      return {
+        success: true,
+        transactionId: transaction.id,
+        kotaniPayTransactionId: withdrawalResult.transactionId,
+        status: withdrawalResult.status,
+        amount: targetAmount,
+        currency: targetCurrency,
+        burnTxHash: burnResult.txHash
+      };
+
+    } catch (error) {
+      logger.error('Error initiating Kotani Pay withdrawal:', error);
+      return {
+        success: false,
+        error: error.message
+      };
+    }
+  }
+
+  /**
+   * Initiate Yellow Card collection (deposit)
+   * @param {string} phoneNumber - User's phone number
+   * @param {number} amount - Amount to deposit
+   * @param {string} currency - Source currency
+   * @param {string} countryCode - Country code
+   * @returns {Promise<Object>} - Deposit initiation result
+   */
+  async initiateYellowCardDeposit(phoneNumber, amount, currency, countryCode) {
+    try {
+      // Ensure user exists
+      let user = await User.findByPhone(phoneNumber);
+      if (!user) {
+        const walletService = require('./walletService');
+        user = await walletService.createUserWallet(phoneNumber);
+      }
+
+      // Get or create Yellow Card customer
+      let customerResult = await YellowCardService.getCustomerByPhone(phoneNumber);
+
+      if (!customerResult.success || customerResult.notFound) {
+        // Create new customer
+        customerResult = await YellowCardService.createCustomer({
+          phoneNumber,
+          firstName: 'Zybra',
+          lastName: 'User',
+          country: countryCode || this.getCountryFromPhone(phoneNumber)
+        });
+
+        if (!customerResult.success) {
+          throw new Error(`Failed to create Yellow Card customer: ${customerResult.error}`);
+        }
+      }
+
+      // Initiate collection
+      const collectionResult = await YellowCardService.initiateCollection({
+        customerId: customerResult.data.id,
+        amount,
+        currency,
+        phoneNumber,
+        callbackUrl: `${process.env.BASE_URL}/api/webhooks/yellowcard`,
+        reference: `ZYBRA_DEP_${Date.now()}`
+      });
+
+      if (!collectionResult.success) {
+        throw new Error(`Failed to initiate Yellow Card collection: ${collectionResult.error}`);
+      }
+
+      // Create pending transaction record
+      const transaction = await Transaction.create({
+        phoneNumber,
+        type: 'deposit',
+        amount,
+        currency,
+        status: 'pending',
+        metadata: {
+          paymentProvider: 'yellowcard',
+          yellowCardCollectionId: collectionResult.collectionId,
+          yellowCardCustomerId: customerResult.data.id
+        }
+      });
+
+      logger.info(`Initiated Yellow Card collection for ${phoneNumber}: ${amount} ${currency}`);
+
+      return {
+        success: true,
+        transactionId: transaction.id,
+        collectionId: collectionResult.collectionId,
+        status: collectionResult.status,
+        paymentInstructions: collectionResult.paymentInstructions,
+        amount,
+        currency
+      };
+
+    } catch (error) {
+      logger.error('Error initiating Yellow Card deposit:', error);
+      return {
+        success: false,
+        error: error.message
+      };
+    }
+  }
+
+  /**
+   * Initiate Yellow Card disbursement (withdrawal)
+   * @param {string} phoneNumber - User's phone number
+   * @param {number} amount - Amount to withdraw in ZrUSD
+   * @param {string} targetCurrency - Target currency
+   * @param {string} countryCode - Country code
+   * @returns {Promise<Object>} - Withdrawal initiation result
+   */
+  async initiateYellowCardWithdrawal(phoneNumber, amount, targetCurrency, countryCode) {
+    try {
+      // Check user balance
+      const user = await User.findByPhone(phoneNumber);
+      if (!user) {
+        throw new Error('User not found');
+      }
+
+      const currentBalance = parseFloat(user.balance || 0);
+      if (currentBalance < amount) {
+        throw new Error(`Insufficient balance. Available: ${currentBalance}, Required: ${amount}`);
+      }
+
+      // Get Yellow Card customer
+      const customerResult = await YellowCardService.getCustomerByPhone(phoneNumber);
+      if (!customerResult.success) {
+        throw new Error(`Yellow Card customer not found: ${customerResult.error}`);
+      }
+
+      // Convert ZrUSD to target currency
+      const targetAmount = await this.convertFromZrUSD(amount, targetCurrency);
+
+      // Burn ZrUSD tokens first
+      const burnResult = await walletService.burnZrUSD(phoneNumber, amount.toString());
+      if (!burnResult.success) {
+        throw new Error('Token burning failed');
+      }
+
+      // Initiate disbursement
+      const disbursementResult = await YellowCardService.initiateDisbursement({
+        customerId: customerResult.data.id,
+        amount: targetAmount,
+        currency: targetCurrency,
+        phoneNumber,
+        callbackUrl: `${process.env.BASE_URL}/api/webhooks/yellowcard`,
+        reference: `ZYBRA_WD_${Date.now()}`
+      });
+
+      if (!disbursementResult.success) {
+        // Re-mint tokens if disbursement initiation failed
+        await walletService.mintZrUSD(phoneNumber, amount.toString());
+        throw new Error(`Failed to initiate Yellow Card disbursement: ${disbursementResult.error}`);
+      }
+
+      // Create transaction record
+      const transaction = await Transaction.create({
+        phoneNumber,
+        type: 'withdrawal',
+        amount: targetAmount,
+        currency: targetCurrency,
+        status: 'pending',
+        txHash: burnResult.txHash,
+        metadata: {
+          paymentProvider: 'yellowcard',
+          yellowCardDisbursementId: disbursementResult.disbursementId,
+          yellowCardCustomerId: customerResult.data.id,
+          originalAmount: amount,
+          originalCurrency: 'ZrUSD'
+        }
+      });
+
+      logger.info(`Initiated Yellow Card disbursement for ${phoneNumber}: ${targetAmount} ${targetCurrency}`);
+
+      return {
+        success: true,
+        transactionId: transaction.id,
+        disbursementId: disbursementResult.disbursementId,
+        status: disbursementResult.status,
+        amount: targetAmount,
+        currency: targetCurrency,
+        burnTxHash: burnResult.txHash
+      };
+
+    } catch (error) {
+      logger.error('Error initiating Yellow Card withdrawal:', error);
+      return {
+        success: false,
+        error: error.message
+      };
+    }
+  }
+
+  /**
+   * Get country code from phone number
+   * @param {string} phoneNumber - Phone number
+   * @returns {string} - Country code
+   */
+  getCountryFromPhone(phoneNumber) {
+    const countryMappings = {
+      '254': 'KE', // Kenya
+      '255': 'TZ', // Tanzania
+      '256': 'UG', // Uganda
+      '260': 'ZM', // Zambia
+      '265': 'MW', // Malawi
+      '233': 'GH', // Ghana
+      '234': 'NG', // Nigeria
+      '237': 'CM', // Cameroon
+      '251': 'ET', // Ethiopia
+      '252': 'SO', // Somalia
+    };
+
+    for (const [code, country] of Object.entries(countryMappings)) {
+      if (phoneNumber.startsWith(code)) {
+        return country;
+      }
+    }
+
+    return 'NG'; // Default to Nigeria for Yellow Card
   }
 
   /**

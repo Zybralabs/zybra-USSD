@@ -10,7 +10,8 @@ A comprehensive SMS and USSD-based transaction system that enables users to inte
 - **USSD Menu System**: Interactive USSD menus for balance checks, transfers, and account management
 - **Blockchain Integration**: Direct interaction with ZrUSD smart contract on Ethereum
 - **Mobile Money Integration**: Support for Airtel Money and other mobile payment providers
-- **Multi-currency Support**: Handle MWK, KES, and other African currencies with automatic conversion
+- **Multi-currency Support**: Handle KES, UGX, TZS, GHS, NGN and other African currencies with automatic conversion
+- **Kotani Pay Integration**: Seamless mobile money deposits and withdrawals across Africa
 
 ### Security & Reliability
 - **Rate Limiting**: Protect against spam and abuse
@@ -96,6 +97,33 @@ A mobile-first DeFi platform that enables users to invest in decentralized finan
 7. User confirms transaction
 8. System processes blockchain transaction
 9. Both users receive SMS confirmations
+
+### USSD Mobile Money Deposit Flow (Multiple Providers)
+1. User dials `*384*96#`
+2. System displays main menu
+3. User selects "Receive Money" (option 3)
+4. System shows: "1. Mobile Money 2. Show Wallet Details"
+5. User selects "1" (Mobile Money)
+6. System shows: "Select provider: 1. Kotani Pay (KE, UG, TZ, GH, NG) 2. Yellow Card (NG, GH, KE, UG, TZ+)"
+7. User selects "1" (Kotani Pay)
+8. System shows: "Select currency: 1. KES (Kenya) 2. UGX (Uganda) 3. TZS (Tanzania) 4. GHS (Ghana) 5. NGN (Nigeria)"
+9. User selects "1" (KES)
+10. System asks: "Enter amount in KES: (Minimum: 10 KES) Provider: Kotani Pay"
+11. User enters: "1000"
+12. System initiates Kotani Pay deposit
+13. System shows: "Kotani Pay Deposit Initiated! Amount: 1000 KES Transaction ID: xyz123..."
+14. User receives SMS with payment instructions
+15. User completes mobile money payment via USSD/app
+16. Kotani Pay webhook confirms payment
+17. System mints ZrUSD tokens and sends SMS confirmation
+
+### Alternative: Yellow Card Deposit Flow
+- Steps 1-6 same as above
+- User selects "2" (Yellow Card)
+- System shows Yellow Card supported currencies (NGN, GHS, KES, UGX, TZS, ZAR, EGP, MAD)
+- User selects currency and enters amount
+- System initiates Yellow Card collection
+- Yellow Card webhook confirms payment and system mints tokens
 
 ### SMS Command Flow
 1. User sends "BALANCE" via SMS
@@ -187,6 +215,14 @@ ZRUSD_CONTRACT_ADDRESS=0x1234567890123456789012345678901234567890
 MASTER_PRIVATE_KEY=0x0000000000000000000000000000000000000000000000000000000000000000
 ```
 
+#### Kotani Pay Configuration
+```env
+KOTANI_PAY_BASE_URL=https://sandbox-api.kotanipay.io/api/v3
+KOTANI_PAY_API_KEY=your_kotani_pay_api_key
+KOTANI_PAY_INTEGRATOR_ID=your_integrator_id
+KOTANI_PAY_WEBHOOK_SECRET=your_webhook_secret
+```
+
 ### Africa's Talking Setup
 
 1. **Create Account**: Sign up at [Africa's Talking](https://africastalking.com)
@@ -233,6 +269,84 @@ POST /api/ussd
 Content-Type: application/x-www-form-urlencoded
 
 sessionId=12345&serviceCode=*384*96#&phoneNumber=254712345678&text=1*2*100
+```
+
+### Kotani Pay Endpoints
+
+#### Initiate Mobile Money Deposit
+```http
+POST /api/kotanipay/deposit
+Authorization: Bearer <token>
+Content-Type: application/json
+
+{
+  "phoneNumber": "254712345678",
+  "amount": 1000,
+  "currency": "KES"
+}
+```
+
+#### Initiate Mobile Money Withdrawal
+```http
+POST /api/kotanipay/withdrawal
+Authorization: Bearer <token>
+Content-Type: application/json
+
+{
+  "phoneNumber": "254712345678",
+  "amount": 100,
+  "targetCurrency": "KES"
+}
+```
+
+#### Get Exchange Rates
+```http
+GET /api/kotanipay/rates?fromCurrency=USD&toCurrency=KES
+```
+
+#### Get Payment Providers
+```http
+GET /api/kotanipay/providers/KE
+```
+
+### Yellow Card Endpoints
+
+#### Initiate Collection (Deposit)
+```http
+POST /api/yellowcard/collection
+Authorization: Bearer <token>
+Content-Type: application/json
+
+{
+  "phoneNumber": "234812345678",
+  "amount": 10000,
+  "currency": "NGN",
+  "countryCode": "NG"
+}
+```
+
+#### Initiate Disbursement (Withdrawal)
+```http
+POST /api/yellowcard/disbursement
+Authorization: Bearer <token>
+Content-Type: application/json
+
+{
+  "phoneNumber": "234812345678",
+  "amount": 100,
+  "targetCurrency": "NGN",
+  "countryCode": "NG"
+}
+```
+
+#### Get Exchange Rates
+```http
+GET /api/yellowcard/rates?fromCurrency=USD&toCurrency=NGN
+```
+
+#### Get Supported Countries
+```http
+GET /api/yellowcard/countries
 ```
 
 ### Transaction Endpoints
